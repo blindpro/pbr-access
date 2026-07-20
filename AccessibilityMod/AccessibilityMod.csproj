@@ -35,6 +35,18 @@
       <HintPath>$(GameDir)\PolygonBitBattleRoyale_Data\Managed\PhotonRealtime.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="UnityEngine.UI">
+      <HintPath>$(GameDir)\PolygonBitBattleRoyale_Data\Managed\UnityEngine.UI.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.UIModule">
+      <HintPath>$(GameDir)\PolygonBitBattleRoyale_Data\Managed\UnityEngine.UIModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.IMGUIModule">
+      <HintPath>$(GameDir)\PolygonBitBattleRoyale_Data\Managed\UnityEngine.IMGUIModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
   </ItemGroup>
 
 </Project>

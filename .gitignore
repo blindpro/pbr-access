@@ -11,6 +11,7 @@ packages/
 ## BepInEx build output
 *.dll
 !Decompiled/**
+!lib/**
 
 ## OS
 Thumbs.db

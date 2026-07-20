@@ -17,20 +17,28 @@ namespace AccessibilityMod
         internal static new ManualLogSource Logger;
         internal static Harmony HarmonyInstance;
 
+        private MenuNavigator _menuNavigator;
+
         private void Awake()
         {
             Logger = base.Logger;
             Logger.LogInfo($"{PluginName} v{PluginVersion} loaded!");
 
+            ScreenReaderManager.Initialize(Logger);
+
             HarmonyInstance = new Harmony(PluginGUID);
             HarmonyInstance.PatchAll();
 
+            _menuNavigator = gameObject.AddComponent<MenuNavigator>();
+
             Logger.LogInfo("Harmony patches applied.");
+            ScreenReaderManager.Speak("Accessibility mod loaded");
         }
 
         private void OnDestroy()
         {
             HarmonyInstance?.UnpatchSelf();
+            ScreenReaderManager.Shutdown();
         }
     }
 }
