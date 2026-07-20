@@ -20,10 +20,13 @@ namespace AccessibilityMod
             AccessTools.Field(typeof(Character), "holdingButtonFire");
         private static readonly FieldInfo _shotsFired =
             AccessTools.Field(typeof(Character), "shotsFired");
-        private static readonly FieldInfo _axisLook =
-            AccessTools.Field(typeof(Character), "axisLook");
         private static readonly FieldInfo _cursorLocked =
             AccessTools.Field(typeof(Character), "cursorLocked");
+
+        // CameraLook rotation state - we modify this directly to avoid
+        // the axisLook persistence bug that causes continuous spinning
+        private static readonly FieldInfo _rotationCharacter =
+            AccessTools.Field(typeof(CameraLook), "rotationCharacter");
 
         private bool _wasFiring;
 
@@ -51,7 +54,7 @@ namespace AccessibilityMod
             }
 
             HandleFire(character);
-            HandleTurning(character);
+            HandleTurning(player);
             HandleFacingReadout(player);
         }
 
@@ -76,7 +79,7 @@ namespace AccessibilityMod
             }
         }
 
-        private void HandleTurning(Character character)
+        private void HandleTurning(CharacterMultiplayer player)
         {
             bool leftHeld = Input.GetKey(KeyCode.LeftArrow);
             bool rightHeld = Input.GetKey(KeyCode.RightArrow);
@@ -89,11 +92,20 @@ namespace AccessibilityMod
             if (leftHeld) yaw = -turnAmount;
             if (rightHeld) yaw = turnAmount;
 
-            // Inject the turn as axisLook.x so CameraLook processes it
-            // the same way as mouse input (applies sensitivity, rotation, etc.)
-            Vector2 currentLook = (Vector2)_axisLook.GetValue(character);
-            currentLook.x += yaw;
-            _axisLook.SetValue(character, currentLook);
+            // Directly rotate the CameraLook's stored rotation target and the
+            // player transform together. This avoids the axisLook persistence
+            // bug — axisLook retains its value between frames when the mouse
+            // isn't moving, causing CameraLook to keep applying the turn.
+            Quaternion turnQuat = Quaternion.Euler(0f, yaw, 0f);
+            player.transform.rotation *= turnQuat;
+
+            var cameraLook = player.GetComponentInChildren<CameraLook>();
+            if (cameraLook != null && _rotationCharacter != null)
+            {
+                Quaternion rot = (Quaternion)_rotationCharacter.GetValue(cameraLook);
+                rot *= turnQuat;
+                _rotationCharacter.SetValue(cameraLook, rot);
+            }
         }
 
         private void HandleFacingReadout(CharacterMultiplayer player)
