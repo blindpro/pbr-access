@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
@@ -6,66 +7,96 @@ using UnityEngine.UI;
 
 namespace AccessibilityMod
 {
-    public class MenuNavigator : MonoBehaviour
+    public class MenuNavigator
     {
         private readonly List<Selectable> _currentSelectables = new List<Selectable>();
         private int _currentIndex = -1;
         private Selectable _lastSelected;
-        private Canvas _lastActiveCanvas;
         private const float RepeatDelay = 0.4f;
         private const float RepeatRate = 0.15f;
         private float _nextRepeatTime;
+        private float _nextRescanTime;
+        private const float RescanInterval = 1.0f;
+        private int _lastSelectableCount;
 
-        private void Update()
+        public void Tick()
         {
-            // Only run when a UI canvas is active and cursor is visible (menu mode)
-            if (!Cursor.visible && Cursor.lockState == CursorLockMode.Locked)
-                return;
-
-            RefreshSelectablesIfNeeded();
+            // Periodically rescan for selectables
+            if (Time.unscaledTime >= _nextRescanTime)
+            {
+                _nextRescanTime = Time.unscaledTime + RescanInterval;
+                RebuildSelectablesList();
+            }
 
             if (_currentSelectables.Count == 0)
                 return;
 
             HandleNavigation();
             HandleActivation();
-            DetectMouseSelection();
-        }
-
-        private void RefreshSelectablesIfNeeded()
-        {
-            // Rebuild the list when the active canvas changes or periodically
-            // to pick up newly shown panels.
-            var activeCanvas = GetTopActiveCanvas();
-            if (activeCanvas != _lastActiveCanvas)
-            {
-                _lastActiveCanvas = activeCanvas;
-                RebuildSelectablesList();
-            }
+            DetectExternalSelection();
         }
 
         private void RebuildSelectablesList()
         {
             _currentSelectables.Clear();
-            _currentIndex = -1;
 
-            if (_lastActiveCanvas == null) return;
+            var allSelectables = UnityEngine.Object.FindObjectsOfType<Selectable>();
 
-            // Gather all interactable selectables under the active canvas,
-            // sorted top-to-bottom by screen position (matching visual order).
-            var all = _lastActiveCanvas.GetComponentsInChildren<Selectable>(false);
-            _currentSelectables.AddRange(
-                all.Where(s => s.IsInteractable() && s.gameObject.activeInHierarchy)
-                   .OrderByDescending(s => GetScreenY(s))
-            );
-
-            if (_currentSelectables.Count > 0)
+            foreach (var s in allSelectables)
             {
-                // If EventSystem already has something selected, sync to it
-                var current = EventSystem.current?.currentSelectedGameObject;
-                if (current != null)
+                if (s == null) continue;
+                if (!s.gameObject.activeInHierarchy) continue;
+                if (!s.IsInteractable()) continue;
+
+                // Skip world-space UI (e.g. in-game health bars)
+                var canvas = s.GetComponentInParent<Canvas>();
+                if (canvas != null && canvas.renderMode == RenderMode.WorldSpace)
+                    continue;
+
+                _currentSelectables.Add(s);
+            }
+
+            // Sort top-to-bottom by screen Y position
+            _currentSelectables.Sort((a, b) => GetScreenY(b).CompareTo(GetScreenY(a)));
+
+            // Log when selectables change
+            if (_currentSelectables.Count != _lastSelectableCount)
+            {
+                Plugin.Logger.LogInfo($"Found {_currentSelectables.Count} UI selectables.");
+                if (_currentSelectables.Count > 0 && _lastSelectableCount == 0)
                 {
-                    var sel = current.GetComponent<Selectable>();
+                    string menuName = DetectMenuName();
+                    if (!string.IsNullOrEmpty(menuName))
+                        ScreenReaderManager.Speak(menuName);
+                }
+                _lastSelectableCount = _currentSelectables.Count;
+            }
+
+            if (_currentSelectables.Count == 0)
+            {
+                _currentIndex = -1;
+                _lastSelected = null;
+                return;
+            }
+
+            // Try to preserve current selection
+            if (_lastSelected != null)
+            {
+                int idx = _currentSelectables.IndexOf(_lastSelected);
+                if (idx >= 0)
+                {
+                    _currentIndex = idx;
+                    return;
+                }
+            }
+
+            // Sync to EventSystem's current selection
+            var currentGO = EventSystem.current != null ? EventSystem.current.currentSelectedGameObject : null;
+            if (currentGO != null)
+            {
+                var sel = currentGO.GetComponent<Selectable>();
+                if (sel != null)
+                {
                     int idx = _currentSelectables.IndexOf(sel);
                     if (idx >= 0)
                     {
@@ -74,10 +105,10 @@ namespace AccessibilityMod
                         return;
                     }
                 }
-
-                // Otherwise select the first item and announce it
-                SetIndex(0);
             }
+
+            // Nothing selected yet - select first item
+            SetIndex(0);
         }
 
         private void HandleNavigation()
@@ -131,13 +162,13 @@ namespace AccessibilityMod
             ActivateSelectable(selectable);
         }
 
-        private void DetectMouseSelection()
+        private void DetectExternalSelection()
         {
-            // If the user clicks on a UI element, sync our index to it
-            var current = EventSystem.current?.currentSelectedGameObject;
-            if (current == null) return;
+            if (EventSystem.current == null) return;
+            var currentGO = EventSystem.current.currentSelectedGameObject;
+            if (currentGO == null) return;
 
-            var sel = current.GetComponent<Selectable>();
+            var sel = currentGO.GetComponent<Selectable>();
             if (sel == null || sel == _lastSelected) return;
 
             int idx = _currentSelectables.IndexOf(sel);
@@ -151,11 +182,12 @@ namespace AccessibilityMod
 
         private void SetIndex(int index)
         {
+            if (index < 0 || index >= _currentSelectables.Count) return;
+
             _currentIndex = index;
             var selectable = _currentSelectables[index];
             _lastSelected = selectable;
 
-            // Set EventSystem selection so the UI highlights correctly
             if (EventSystem.current != null)
                 EventSystem.current.SetSelectedGameObject(selectable.gameObject);
 
@@ -175,14 +207,14 @@ namespace AccessibilityMod
             if (!string.IsNullOrEmpty(state))
                 announcement += ", " + state;
 
-            Plugin.Logger.LogDebug($"Announcing: {announcement}");
+            announcement += $", {_currentIndex + 1} of {_currentSelectables.Count}";
+
+            Plugin.Logger.LogInfo($"Announce: {announcement}");
             ScreenReaderManager.Speak(announcement);
         }
 
         private static string GetSelectableLabel(Selectable selectable)
         {
-            // Try to get the text from the component itself or its children
-            // Check for direct text on the selectable's children
             var tmpText = selectable.GetComponentInChildren<TMPro.TMP_Text>(false);
             if (tmpText != null && !string.IsNullOrWhiteSpace(tmpText.text))
                 return tmpText.text.Trim();
@@ -191,12 +223,10 @@ namespace AccessibilityMod
             if (uiText != null && !string.IsNullOrWhiteSpace(uiText.text))
                 return uiText.text.Trim();
 
-            // For dropdowns, read the caption
             var dropdown = selectable as Dropdown;
             if (dropdown != null && dropdown.captionText != null)
                 return dropdown.captionText.text.Trim();
 
-            // For sliders, look for a nearby label
             var slider = selectable as Slider;
             if (slider != null)
             {
@@ -205,7 +235,6 @@ namespace AccessibilityMod
                     return nearby;
             }
 
-            // For input fields, read placeholder or current text
             var inputField = selectable as InputField;
             if (inputField != null)
             {
@@ -219,7 +248,6 @@ namespace AccessibilityMod
                 }
             }
 
-            // Try the GameObject name as last resort
             return CleanName(selectable.gameObject.name);
         }
 
@@ -259,7 +287,6 @@ namespace AccessibilityMod
 
         private static string FindNearbyLabel(Selectable selectable)
         {
-            // Look for a Text or TMP_Text sibling or parent label
             var parent = selectable.transform.parent;
             if (parent == null) return null;
 
@@ -278,7 +305,6 @@ namespace AccessibilityMod
 
         private static string CleanName(string name)
         {
-            // Convert "PlayButton" or "play_button" to "Play Button"
             var result = System.Text.RegularExpressions.Regex.Replace(name, "([a-z])([A-Z])", "$1 $2");
             result = result.Replace("_", " ").Replace("(", "").Replace(")", "").Trim();
             return result;
@@ -315,7 +341,6 @@ namespace AccessibilityMod
                 return;
             }
 
-            // For sliders, Enter doesn't do much but we can acknowledge
             if (selectable is Slider)
             {
                 ScreenReaderManager.Speak("Use left and right arrows to adjust");
@@ -331,30 +356,24 @@ namespace AccessibilityMod
             return screenPos.y;
         }
 
-        private Canvas GetTopActiveCanvas()
+        private static string DetectMenuName()
         {
-            // Find the topmost active canvas with interactable elements
-            Canvas best = null;
-            int bestOrder = int.MinValue;
-
-            foreach (var canvas in FindObjectsOfType<Canvas>())
+            var canvases = UnityEngine.Object.FindObjectsOfType<Canvas>();
+            foreach (var canvas in canvases)
             {
                 if (!canvas.gameObject.activeInHierarchy) continue;
-                if (!canvas.isRootCanvas) continue;
                 if (canvas.renderMode == RenderMode.WorldSpace) continue;
 
-                // Check it has at least one interactable selectable
-                var selectables = canvas.GetComponentsInChildren<Selectable>(false);
-                bool hasInteractable = selectables.Any(s => s.IsInteractable() && s.gameObject.activeInHierarchy);
-                if (!hasInteractable) continue;
-
-                if (canvas.sortingOrder > bestOrder)
+                var texts = canvas.GetComponentsInChildren<TMPro.TMP_Text>(false);
+                foreach (var t in texts)
                 {
-                    bestOrder = canvas.sortingOrder;
-                    best = canvas;
+                    if (t.GetComponentInParent<Selectable>() != null) continue;
+                    if (string.IsNullOrWhiteSpace(t.text)) continue;
+                    if (t.fontSize >= 24)
+                        return t.text.Trim();
                 }
             }
-            return best;
+            return null;
         }
     }
 }

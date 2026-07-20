@@ -20,13 +20,39 @@ namespace AccessibilityMod
 
             try
             {
-                // Add our lib folder to the DLL search path so Tolk.dll and
-                // vendor DLLs (nvdaControllerClient64.dll, SAAPI64.dll) can be found.
+                // Mono's P/Invoke does not respect SetDllDirectory, so we must
+                // preload Tolk.dll (and its dependencies) with LoadLibrary from
+                // the explicit path before any P/Invoke call into Tolk.
                 string libPath = Path.Combine(
                     Path.GetDirectoryName(typeof(ScreenReaderManager).Assembly.Location),
                     "lib", "x64");
+
+                logger.LogInfo($"Tolk lib path: {libPath}");
+                logger.LogInfo($"Tolk lib path exists: {Directory.Exists(libPath)}");
+
                 if (Directory.Exists(libPath))
+                {
+                    // Set DLL search path so Tolk's own dependencies resolve
                     SetDllDirectory(libPath);
+
+                    // Preload the native DLLs so Mono can find them
+                    string tolkPath = Path.Combine(libPath, "Tolk.dll");
+                    logger.LogInfo($"Loading native Tolk from: {tolkPath}");
+                    IntPtr handle = LoadLibrary(tolkPath);
+                    if (handle == IntPtr.Zero)
+                    {
+                        int err = Marshal.GetLastWin32Error();
+                        logger.LogError($"LoadLibrary failed for Tolk.dll, Win32 error: {err}");
+                    }
+                    else
+                    {
+                        logger.LogInfo("Native Tolk.dll loaded successfully.");
+                    }
+                }
+                else
+                {
+                    logger.LogError($"Tolk lib directory not found: {libPath}");
+                }
 
                 DavyKager.Tolk.TrySAPI(true);
                 DavyKager.Tolk.Load();
@@ -42,10 +68,15 @@ namespace AccessibilityMod
                     logger.LogWarning("No screen reader detected. SAPI will be used as fallback.");
                     _available = DavyKager.Tolk.HasSpeech();
                 }
+
+                if (_available)
+                    logger.LogInfo("Tolk initialized successfully, speech is available.");
+                else
+                    logger.LogWarning("Tolk initialized but no speech output available.");
             }
             catch (Exception ex)
             {
-                logger.LogError($"Failed to initialize Tolk: {ex.Message}");
+                logger.LogError($"Failed to initialize Tolk: {ex}");
                 _available = false;
             }
         }
@@ -88,5 +119,8 @@ namespace AccessibilityMod
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
         private static extern bool SetDllDirectory(string lpPathName);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern IntPtr LoadLibrary(string lpFileName);
     }
 }
