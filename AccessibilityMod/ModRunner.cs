@@ -7,12 +7,14 @@ namespace AccessibilityMod
     {
         private MenuNavigator _menuNavigator;
         private HudReader _hudReader;
+        private AccessibleInputController _inputController;
         private bool _hasSpokenReady;
 
         private void Awake()
         {
             _menuNavigator = new MenuNavigator();
             _hudReader = new HudReader();
+            _inputController = new AccessibleInputController();
         }
 
         private void Update()
@@ -27,6 +29,7 @@ namespace AccessibilityMod
 
                 _menuNavigator.Tick();
                 _hudReader.Tick();
+                _inputController.Tick();
             }
             catch (Exception ex)
             {
