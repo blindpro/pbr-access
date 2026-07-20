@@ -54,6 +54,13 @@ namespace AccessibilityMod
         [HarmonyPatch(typeof(MatchmakingManager), nameof(MatchmakingManager.JoinRoomOffline))]
         static bool JoinRoomOffline_Prefix(MatchmakingManager __instance)
         {
+            // Guard against double-calls (button can fire twice)
+            if (_goingOffline)
+            {
+                Plugin.Logger.LogInfo("OfflineModeFix: JoinRoomOffline already in progress, skipping");
+                return false;
+            }
+
             Plugin.Logger.LogInfo("OfflineModeFix: JoinRoomOffline intercepted");
             _goingOffline = true;
 
@@ -105,15 +112,19 @@ namespace AccessibilityMod
 
         private static void EnterOfflineAndJoin(MatchmakingManager instance)
         {
-            _goingOffline = false;
-
+            // Keep _goingOffline true until AFTER setting OfflineMode,
+            // because setting OfflineMode = true triggers OnConnectedToMaster
+            // synchronously and we need the guard to suppress it.
             if (!PhotonNetwork.OfflineMode)
             {
                 Plugin.Logger.LogInfo("OfflineModeFix: Setting PhotonNetwork.OfflineMode = true");
                 PhotonNetwork.OfflineMode = true;
             }
 
-            // Now create a room directly. In offline mode, CreateRoom succeeds
+            // Now safe to clear the flag
+            _goingOffline = false;
+
+            // Create a room directly. In offline mode, CreateRoom succeeds
             // immediately and triggers OnJoinedRoom synchronously.
             Plugin.Logger.LogInfo("OfflineModeFix: Creating offline room");
 
