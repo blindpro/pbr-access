@@ -1,0 +1,22 @@
+## .NET / Visual Studio
+bin/
+obj/
+*.user
+*.suo
+*.vs/
+.vs/
+*.nupkg
+packages/
+
+## BepInEx build output
+*.dll
+!Decompiled/**
+
+## OS
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+## IDE
+.idea/
+*.sln.DotSettings.user
