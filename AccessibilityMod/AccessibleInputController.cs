@@ -103,6 +103,10 @@ namespace AccessibilityMod
 
         private void HandleTurning(CharacterMultiplayer player)
         {
+            // Left Arrow closes the loot list, so it must not also spin the player
+            // while that list is up.
+            if (LootMenu.IsOpen) return;
+
             bool leftHeld = Input.GetKey(KeyCode.LeftArrow);
             bool rightHeld = Input.GetKey(KeyCode.RightArrow);
 

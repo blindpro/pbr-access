@@ -29,6 +29,26 @@ namespace AccessibilityMod
         }
 
         /// <summary>
+        /// Escape belongs to the loot list while it is open. The game reaches the
+        /// pause menu two ways - a raw key read in PauseInputs and the input-system
+        /// cursor toggle - and both are held off, so Escape closes the list instead
+        /// of dropping the player into the pause menu on top of it.
+        /// </summary>
+        [HarmonyPrefix]
+        [HarmonyPatch(typeof(HP.Generics.PauseInputs), "Update")]
+        static bool PauseInputs_Update_Prefix()
+        {
+            return !LootMenu.BlocksPause;
+        }
+
+        [HarmonyPrefix]
+        [HarmonyPatch(typeof(GameManager), "OnLockCursor")]
+        static bool GameManager_OnLockCursor_Prefix()
+        {
+            return !LootMenu.BlocksPause;
+        }
+
+        /// <summary>
         /// After PickupsManager.Start, increase the pick range.
         /// </summary>
         [HarmonyPostfix]

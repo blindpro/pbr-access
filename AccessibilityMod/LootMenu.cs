@@ -12,7 +12,7 @@ namespace AccessibilityMod
     /// now gathers every item within pick range instead:
     /// - one item, it is simply taken
     /// - more than one, a spoken list opens. Up and Down move through it, Enter
-    ///   takes the selected item, E or Escape closes it.
+    ///   takes the selected item, and Left Arrow, Escape or E closes it.
     ///
     /// The list rebuilds after each take, so the player can empty a pile without
     /// reopening anything.
@@ -44,6 +44,14 @@ namespace AccessibilityMod
         /// </summary>
         public static bool IsPicking { get; private set; }
 
+        /// <summary>
+        /// Escape closes the list and must not also open the pause menu behind it.
+        /// The game reads Escape in its own Update, which may run after ours in the
+        /// same frame, so the block outlives the close by a moment.
+        /// </summary>
+        private static float _blockPauseUntil;
+        public static bool BlocksPause => IsOpen || Time.time < _blockPauseUntil;
+
         private readonly List<Entry> _entries = new List<Entry>();
         private int _index;
 
@@ -70,7 +78,11 @@ namespace AccessibilityMod
 
         private void HandleOpen(CharacterMultiplayer player, PickupsManager pickupsMgr)
         {
-            if (Input.GetKeyDown(KeyCode.E) || Input.GetKeyDown(KeyCode.Escape))
+            // Left Arrow is the quick way out - it is already the "back" hand
+            // position, and it cannot be confused with Up, Down or Enter.
+            if (Input.GetKeyDown(KeyCode.LeftArrow)
+                || Input.GetKeyDown(KeyCode.Escape)
+                || Input.GetKeyDown(KeyCode.E))
             {
                 Close("Loot closed");
                 return;
@@ -128,6 +140,7 @@ namespace AccessibilityMod
         {
             if (!IsOpen) return;
             IsOpen = false;
+            _blockPauseUntil = Time.time + 0.25f;
             _entries.Clear();
             _index = 0;
             if (message != null)
