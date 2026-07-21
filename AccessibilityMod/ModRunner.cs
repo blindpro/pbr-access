@@ -10,6 +10,7 @@ namespace AccessibilityMod
         private AccessibleInputController _inputController;
         private NavigationAssistant _navigationAssistant;
         private AimAssist _aimAssist;
+        private AudioTargeting _audioTargeting;
         private bool _hasSpokenReady;
 
         private void Awake()
@@ -19,6 +20,7 @@ namespace AccessibilityMod
             _inputController = new AccessibleInputController();
             _navigationAssistant = new NavigationAssistant();
             _aimAssist = new AimAssist();
+            _audioTargeting = new AudioTargeting();
         }
 
         private void Update()
@@ -36,6 +38,7 @@ namespace AccessibilityMod
                 _inputController.Tick();
                 _navigationAssistant.Tick();
                 _aimAssist.Tick();
+                _audioTargeting.Tick();
             }
             catch (Exception ex)
             {

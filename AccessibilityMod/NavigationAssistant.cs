@@ -9,6 +9,8 @@ namespace AccessibilityMod
     /// - Wall detection ahead with distance callouts
     /// - Doorway/opening detection to the left and right
     /// - Nearby loot announcements with item names
+    /// - A distinct proximity beep for ammo that fits the player's current weapon
+    /// - Wide long-range building scan with direction/distance callouts
     /// - Pickup confirmation announcements
     /// - Indoor/outdoor transition detection
     /// </summary>
@@ -42,9 +44,20 @@ namespace AccessibilityMod
 
         // Loot proximity audio cue (spatial 3D at loot position)
         private AudioClip _lootBeep;
+        private AudioClip _ammoBeep; // distinct double-beep for weapon-compatible ammo
         private float _lootBeepTimer;
         private const float LootBeepMaxInterval = 1.5f; // far away beep rate
         private const float LootBeepMinInterval = 0.3f; // close beep rate
+
+        // Wide long-range building scan
+        private const float BuildingScanInterval = 3f;     // how often to sweep
+        private const float BuildingMinDistance = 18f;      // ignore close hits (handled by wall check)
+        private const float BuildingMaxDistance = 60f;      // how far to look
+        private const float BuildingDistBucket = 10f;       // round distance to nearest 10m
+        private const float BuildingReannounceInterval = 8f;
+        private float _buildingScanTimer;
+        private float _buildingReannounceTimer;
+        private string _lastBuildingAnnounce;
 
         // Indoor/outdoor detection
         private const float CeilingCheckHeight = 20f;
@@ -78,11 +91,12 @@ namespace AccessibilityMod
             if (_scanTimer > 0f) return;
             _scanTimer = ScanInterval;
 
-            EnsureLootBeep(player);
+            EnsureBeeps(player);
             CheckWallAhead(player);
             CheckDoorways(player);
             CheckNearbyLoot(player);
             CheckLootProximityBeep(player);
+            CheckBuildingsInDistance(player);
             CheckPickupConfirmation(player);
             CheckWeaponDraw(player);
             CheckIndoorOutdoor(player);
@@ -261,23 +275,56 @@ namespace AccessibilityMod
             }
         }
 
-        private void EnsureLootBeep(CharacterMultiplayer player)
+        private void EnsureBeeps(CharacterMultiplayer player)
         {
-            if (_lootBeep != null) return;
+            const int sampleRate = 44100;
 
-            // Generate a short beep tone for loot proximity
-            int sampleRate = 44100;
-            float duration = 0.12f;
-            int sampleCount = (int)(sampleRate * duration);
-            float[] samples = new float[sampleCount];
-            for (int i = 0; i < sampleCount; i++)
+            // Generic loot beep: a single 880 Hz tone.
+            if (_lootBeep == null)
             {
-                float t = (float)i / sampleRate;
-                float envelope = 1f - (t / duration); // fade out
-                samples[i] = Mathf.Sin(2f * Mathf.PI * 880f * t) * 0.5f * envelope;
+                float duration = 0.12f;
+                int sampleCount = (int)(sampleRate * duration);
+                float[] samples = new float[sampleCount];
+                for (int i = 0; i < sampleCount; i++)
+                {
+                    float t = (float)i / sampleRate;
+                    float envelope = 1f - (t / duration); // fade out
+                    samples[i] = Mathf.Sin(2f * Mathf.PI * 880f * t) * 0.5f * envelope;
+                }
+                _lootBeep = AudioClip.Create("LootBeep", sampleCount, 1, sampleRate, false);
+                _lootBeep.SetData(samples, 0);
             }
-            _lootBeep = AudioClip.Create("LootBeep", sampleCount, 1, sampleRate, false);
-            _lootBeep.SetData(samples, 0);
+
+            // Ammo beep: a distinct higher-pitched DOUBLE beep so the player can
+            // instantly tell "this is ammo that fits my gun" apart from other loot.
+            if (_ammoBeep == null)
+            {
+                const float pulse = 0.05f;
+                const float gap = 0.03f;
+                const float freq = 1245f;
+                float duration = pulse * 2f + gap;
+                int sampleCount = (int)(sampleRate * duration);
+                float[] samples = new float[sampleCount];
+                for (int i = 0; i < sampleCount; i++)
+                {
+                    float t = (float)i / sampleRate;
+                    float amp = 0f;
+                    if (t < pulse)
+                    {
+                        float env = 1f - (t / pulse);
+                        amp = Mathf.Sin(2f * Mathf.PI * freq * t) * 0.5f * env;
+                    }
+                    else if (t >= pulse + gap && t < pulse * 2f + gap)
+                    {
+                        float lt = t - (pulse + gap);
+                        float env = 1f - (lt / pulse);
+                        amp = Mathf.Sin(2f * Mathf.PI * freq * lt) * 0.5f * env;
+                    }
+                    samples[i] = amp;
+                }
+                _ammoBeep = AudioClip.Create("AmmoBeep", sampleCount, 1, sampleRate, false);
+                _ammoBeep.SetData(samples, 0);
+            }
         }
 
         private void CheckLootProximityBeep(CharacterMultiplayer player)
@@ -312,21 +359,28 @@ namespace AccessibilityMod
             if (_lootBeepTimer <= 0f)
             {
                 _lootBeepTimer = interval;
-                if (_lootBeep != null)
+
+                // Use the distinct ammo tone when this box holds ammo that fits
+                // the player's current weapon; otherwise the generic loot tone.
+                var inv = player.GetComponent<CharacterInventory>();
+                bool hasCompatibleAmmo = BoxHasCompatibleAmmo(closestBox, inv);
+                AudioClip clip = hasCompatibleAmmo ? _ammoBeep : _lootBeep;
+
+                if (clip != null)
                 {
                     // Play at the loot box's world position as 3D spatial audio
-                    PlaySpatialBeep(closestBox.transform.position, Mathf.Lerp(0.5f, 1f, t));
+                    PlaySpatialBeep(clip, closestBox.transform.position, Mathf.Lerp(0.5f, 1f, t));
                 }
             }
         }
 
-        private void PlaySpatialBeep(Vector3 position, float volume)
+        private void PlaySpatialBeep(AudioClip clip, Vector3 position, float volume)
         {
             // Create a temporary GameObject with an AudioSource at the loot position
             var tempObj = new GameObject("LootBeepTemp");
             tempObj.transform.position = position;
             var source = tempObj.AddComponent<AudioSource>();
-            source.clip = _lootBeep;
+            source.clip = clip;
             source.spatialBlend = 1f; // fully 3D
             source.rolloffMode = AudioRolloffMode.Linear;
             source.minDistance = 1f;
@@ -334,7 +388,134 @@ namespace AccessibilityMod
             source.volume = volume;
             source.Play();
             // Destroy after the clip finishes
-            Object.Destroy(tempObj, _lootBeep.length + 0.1f);
+            Object.Destroy(tempObj, clip.length + 0.1f);
+        }
+
+        /// <summary>
+        /// True if the box contains any ammo item whose type matches a weapon the
+        /// player currently holds (i.e. ammo they could actually load into their gun).
+        /// </summary>
+        private static bool BoxHasCompatibleAmmo(AmmoBox box, CharacterInventory inv)
+        {
+            if (box == null || box.items == null || inv == null) return false;
+
+            foreach (var item in box.items)
+            {
+                if (item == null) continue;
+                if (!item.type.ToString().Contains("ammo")) continue;
+                if (AmmoFitsWeapon(inv.weapon1, item.type) || AmmoFitsWeapon(inv.weapon2, item.type))
+                    return true;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Mirrors CharacterInventory.UseAmmoItem's weapon-name to ammo-type matching.
+        /// </summary>
+        private static bool AmmoFitsWeapon(PickupsManager.Item weapon, PickupsManager.ItemType ammoType)
+        {
+            if (weapon == null || string.IsNullOrEmpty(weapon.name)) return false;
+            string n = weapon.name;
+
+            if ((n.Contains("SMG") || n.Contains("Handgun")) && ammoType == PickupsManager.ItemType.ammo_smg_gun)
+                return true;
+            if (n.Contains("Sniper") && ammoType == PickupsManager.ItemType.ammo_sniper)
+                return true;
+            if (n.Contains("Assault") && ammoType == PickupsManager.ItemType.ammo_assault)
+                return true;
+            if (n.Contains("Shotgun") && ammoType == PickupsManager.ItemType.ammo_shotgun)
+                return true;
+            if ((n.Contains("Rocket Launcher") || n.Contains("Grenade Launcher")) && ammoType == PickupsManager.ItemType.ammo_grenades_launchers)
+                return true;
+
+            return false;
+        }
+
+        /// <summary>
+        /// Sweeps a wide arc at long range as the player walks, announcing large
+        /// vertical structures (buildings) with a direction and distance, e.g.
+        /// "Building in the distance, 50 meters left". Complements the short-range
+        /// wall check by giving advance warning of buildings across open ground.
+        /// </summary>
+        private void CheckBuildingsInDistance(CharacterMultiplayer player)
+        {
+            _buildingScanTimer -= ScanInterval;
+            if (_buildingReannounceTimer > 0f) _buildingReannounceTimer -= ScanInterval;
+
+            if (_buildingScanTimer > 0f) return;
+            _buildingScanTimer = BuildingScanInterval;
+
+            // Indoors, everything is close walls - skip the distance scan.
+            if (_isIndoors) return;
+
+            // Raise the origin so terrain bumps and low cover don't count.
+            Vector3 origin = player.transform.position + Vector3.up * 3f;
+            int mask = GetObstacleMask();
+
+            float bestDist = float.MaxValue;
+            float bestAngle = 0f;
+            bool found = false;
+
+            // Sweep a wide fan relative to where the player faces.
+            for (float angle = -135f; angle <= 135f; angle += 22.5f)
+            {
+                Vector3 dir = Quaternion.Euler(0, angle, 0) * player.transform.forward;
+
+                if (!Physics.Raycast(origin, dir, out RaycastHit hit, BuildingMaxDistance,
+                    mask, QueryTriggerInteraction.Ignore))
+                    continue;
+
+                if (hit.distance < BuildingMinDistance) continue; // near obstacles handled elsewhere
+                if (!IsLikelyBuilding(origin, dir, hit)) continue;
+
+                if (hit.distance < bestDist)
+                {
+                    bestDist = hit.distance;
+                    bestAngle = angle;
+                    found = true;
+                }
+            }
+
+            if (!found)
+            {
+                _lastBuildingAnnounce = null;
+                return;
+            }
+
+            // Reuse the shared 8-way vocabulary by projecting a point in that direction.
+            Vector3 target = player.transform.position
+                + (Quaternion.Euler(0, bestAngle, 0) * player.transform.forward) * bestDist;
+            string direction = GetRelativeDirection(player.transform, target);
+
+            int bucket = Mathf.RoundToInt(bestDist / BuildingDistBucket) * (int)BuildingDistBucket;
+            string key = direction + bucket;
+
+            // Don't repeat the same callout until the cooldown elapses.
+            if (key == _lastBuildingAnnounce && _buildingReannounceTimer > 0f) return;
+
+            _lastBuildingAnnounce = key;
+            _buildingReannounceTimer = BuildingReannounceInterval;
+
+            string prefix = bucket >= 40 ? "Building in the distance" : "Building";
+            // interrupt: false so near-wall safety callouts always take priority.
+            ScreenReaderManager.Speak($"{prefix}, {bucket} meters {direction}", false);
+        }
+
+        /// <summary>
+        /// Confirms a hit is a tall vertical face (building) rather than a slope or
+        /// terrain, by casting a second ray higher and checking it hits at a similar
+        /// distance. A slope's higher ray travels farther before hitting.
+        /// </summary>
+        private bool IsLikelyBuilding(Vector3 origin, Vector3 dir, RaycastHit lowHit)
+        {
+            Vector3 highOrigin = origin + Vector3.up * 4f;
+            if (Physics.Raycast(highOrigin, dir, out RaycastHit highHit, lowHit.distance + 5f,
+                GetObstacleMask(), QueryTriggerInteraction.Ignore))
+            {
+                if (Mathf.Abs(highHit.distance - lowHit.distance) < 3f)
+                    return true;
+            }
+            return false;
         }
 
         private void CheckPickupConfirmation(CharacterMultiplayer player)
