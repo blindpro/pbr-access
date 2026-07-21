@@ -16,11 +16,12 @@ namespace AccessibilityMod
     {
         // Wall detection
         private const float WallCheckDistance = 15f;
-        private const float WallAnnounceInterval = 1.5f;
-        private const float WallClearInterval = 3f;
-        private float _wallAnnounceTimer;
+        private const float WallDistChangeThreshold = 2f; // re-announce when distance changes by this much
+        private const float WallPeriodicInterval = 5f; // periodic re-announce if still facing wall
+        private float _wallPeriodicTimer;
         private bool _wallAhead;
         private float _lastWallDist;
+        private float _lastAnnouncedWallDist;
 
         // Doorway/opening detection
         private const float DoorCheckDistance = 8f;
@@ -39,12 +40,19 @@ namespace AccessibilityMod
         private PickupsManager.Item _lastPickItem;
         private AmmoBox _lastPickBox;
 
+        // Pickup audio cue
+        private AudioClip _pickupBeep;
+        private AudioSource _audioSource;
+
         // Indoor/outdoor detection
         private const float CeilingCheckHeight = 20f;
         private bool _isIndoors;
         private bool _indoorStateSet;
         private const float IndoorCheckInterval = 1f;
         private float _indoorCheckTimer;
+
+        // Weapon draw tracking
+        private string _lastWeaponName;
 
         // Scan timing
         private const float ScanInterval = 0.15f;
@@ -68,16 +76,18 @@ namespace AccessibilityMod
             if (_scanTimer > 0f) return;
             _scanTimer = ScanInterval;
 
+            EnsurePickupBeep(player);
             CheckWallAhead(player);
             CheckDoorways(player);
             CheckNearbyLoot(player);
-            CheckPickupConfirmation();
+            CheckPickupConfirmation(player);
+            CheckWeaponDraw(player);
             CheckIndoorOutdoor(player);
         }
 
         private void CheckWallAhead(CharacterMultiplayer player)
         {
-            _wallAnnounceTimer -= ScanInterval;
+            _wallPeriodicTimer -= ScanInterval;
 
             Vector3 origin = player.transform.position + Vector3.up * 1f;
             Vector3 forward = player.transform.forward;
@@ -89,11 +99,17 @@ namespace AccessibilityMod
             {
                 float dist = Mathf.Round(hitInfo.distance);
 
-                if (!_wallAhead || _wallAnnounceTimer <= 0f)
+                bool isNew = !_wallAhead;
+                bool distChanged = Mathf.Abs(dist - _lastAnnouncedWallDist) >= WallDistChangeThreshold;
+                bool periodicUpdate = _wallAhead && _wallPeriodicTimer <= 0f;
+
+                _wallAhead = true;
+                _lastWallDist = dist;
+
+                if (isNew || distChanged || periodicUpdate)
                 {
-                    _wallAhead = true;
-                    _lastWallDist = dist;
-                    _wallAnnounceTimer = dist <= 2f ? WallAnnounceInterval * 0.5f : WallAnnounceInterval;
+                    _lastAnnouncedWallDist = dist;
+                    _wallPeriodicTimer = WallPeriodicInterval;
 
                     if (dist <= 1f)
                         ScreenReaderManager.Speak("Wall!");
@@ -103,10 +119,9 @@ namespace AccessibilityMod
             }
             else
             {
-                if (_wallAhead && _wallAnnounceTimer <= 0f)
+                if (_wallAhead)
                 {
                     _wallAhead = false;
-                    _wallAnnounceTimer = WallClearInterval;
                     ScreenReaderManager.Speak("Clear");
                 }
             }
@@ -243,7 +258,38 @@ namespace AccessibilityMod
             }
         }
 
-        private void CheckPickupConfirmation()
+        private void EnsurePickupBeep(CharacterMultiplayer player)
+        {
+            if (_pickupBeep != null) return;
+
+            // Generate a short rising beep tone
+            int sampleRate = 44100;
+            float duration = 0.15f;
+            int sampleCount = (int)(sampleRate * duration);
+            float[] samples = new float[sampleCount];
+            for (int i = 0; i < sampleCount; i++)
+            {
+                float t = (float)i / sampleRate;
+                float freq = 600f + 400f * (t / duration); // rising from 600 to 1000 Hz
+                samples[i] = Mathf.Sin(2f * Mathf.PI * freq * t) * 0.5f;
+            }
+            _pickupBeep = AudioClip.Create("PickupBeep", sampleCount, 1, sampleRate, false);
+            _pickupBeep.SetData(samples, 0);
+
+            // Create a dedicated 2D AudioSource so the beep is always audible
+            _audioSource = player.gameObject.AddComponent<AudioSource>();
+            _audioSource.spatialBlend = 0f; // fully 2D
+            _audioSource.volume = 1f;
+            _audioSource.playOnAwake = false;
+        }
+
+        private void PlayPickupBeep()
+        {
+            if (_audioSource != null && _pickupBeep != null)
+                _audioSource.PlayOneShot(_pickupBeep);
+        }
+
+        private void CheckPickupConfirmation(CharacterMultiplayer player)
         {
             if (GameManager.Instance == null) return;
             var pickupsMgr = GameManager.Instance.GetComponent<PickupsManager>();
@@ -265,6 +311,7 @@ namespace AccessibilityMod
                 {
                     string name = !string.IsNullOrEmpty(_lastPickItem.short_description)
                         ? _lastPickItem.short_description : _lastPickItem.description;
+                    PlayPickupBeep();
                     ScreenReaderManager.Speak($"Picked up {name}");
 
                     // Force re-announce remaining loot
@@ -275,6 +322,27 @@ namespace AccessibilityMod
 
             _lastPickItem = currentPickItem;
             _lastPickBox = currentPickBox;
+        }
+
+        private void CheckWeaponDraw(CharacterMultiplayer player)
+        {
+            var character = player.GetComponent<Character>();
+            if (character == null) return;
+
+            var weapon = character.GetEquippedWeapon();
+            if (weapon == null) return;
+
+            string weaponName = weapon.GetWeaponName();
+            if (string.IsNullOrEmpty(weaponName)) return;
+
+            if (weaponName != _lastWeaponName)
+            {
+                // Don't announce on first detection (game start)
+                if (_lastWeaponName != null)
+                    ScreenReaderManager.Speak(weaponName);
+
+                _lastWeaponName = weaponName;
+            }
         }
 
         private void CheckIndoorOutdoor(CharacterMultiplayer player)
