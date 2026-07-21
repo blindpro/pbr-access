@@ -313,10 +313,24 @@ namespace AccessibilityMod
         {
             try
             {
+                var charInv = player.GetComponent<CharacterInventory>();
                 var character = player.GetComponent<Character>();
-                if (character == null)
+                if (character == null || charInv == null)
                 {
                     ScreenReaderManager.Speak("No weapon info");
+                    return;
+                }
+
+                // Use CharacterInventory to check what the player actually has
+                // The game always sets weapon1 to "Handgun 01" by default
+                bool hasRealWeapon = charInv.weapon1 != null
+                    && charInv.weapon1.name != "Handgun 01";
+                bool hasWeapon2 = charInv.weapon2 != null;
+
+                if (!hasRealWeapon && !hasWeapon2)
+                {
+                    int grenades = character.GetGrenadesCurrent();
+                    ScreenReaderManager.Speak($"No weapon. {grenades} grenades");
                     return;
                 }
 
@@ -327,14 +341,20 @@ namespace AccessibilityMod
                     return;
                 }
 
+                // Use inventory short_description for a cleaner name
+                int currentWeaponSlot = charInv.GetCurrentWeapon();
+                var invItem = currentWeaponSlot == 0 ? charInv.weapon1 : charInv.weapon2;
+                string weaponName = invItem != null && !string.IsNullOrEmpty(invItem.short_description)
+                    ? invItem.short_description
+                    : (weapon.GetWeaponName() ?? "Unknown");
+
                 int current = weapon.GetAmmunitionCurrent();
                 int magSize = weapon.GetAmmunitionTotal();
                 int reserveMags = weapon.GetCurrentMags();
-                string weaponName = weapon.GetWeaponName() ?? "Unknown";
                 string ammoText = $"{weaponName}, {current} of {magSize}, {reserveMags} magazines";
 
-                int grenades = character.GetGrenadesCurrent();
-                ScreenReaderManager.Speak($"{ammoText}. {grenades} grenades");
+                int grenades2 = character.GetGrenadesCurrent();
+                ScreenReaderManager.Speak($"{ammoText}. {grenades2} grenades");
             }
             catch (Exception)
             {

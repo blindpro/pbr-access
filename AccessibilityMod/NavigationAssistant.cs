@@ -40,9 +40,12 @@ namespace AccessibilityMod
         private PickupsManager.Item _lastPickItem;
         private AmmoBox _lastPickBox;
 
-        // Pickup audio cue
-        private AudioClip _pickupBeep;
-        private AudioSource _audioSource;
+        // Loot proximity audio cue
+        private AudioClip _lootBeep;
+        private AudioSource _lootAudioSource;
+        private float _lootBeepTimer;
+        private const float LootBeepMaxInterval = 1.5f; // far away beep rate
+        private const float LootBeepMinInterval = 0.3f; // close beep rate
 
         // Indoor/outdoor detection
         private const float CeilingCheckHeight = 20f;
@@ -76,10 +79,11 @@ namespace AccessibilityMod
             if (_scanTimer > 0f) return;
             _scanTimer = ScanInterval;
 
-            EnsurePickupBeep(player);
+            EnsureLootBeep(player);
             CheckWallAhead(player);
             CheckDoorways(player);
             CheckNearbyLoot(player);
+            CheckLootProximityBeep(player);
             CheckPickupConfirmation(player);
             CheckWeaponDraw(player);
             CheckIndoorOutdoor(player);
@@ -258,35 +262,66 @@ namespace AccessibilityMod
             }
         }
 
-        private void EnsurePickupBeep(CharacterMultiplayer player)
+        private void EnsureLootBeep(CharacterMultiplayer player)
         {
-            if (_pickupBeep != null) return;
+            if (_lootBeep != null) return;
 
-            // Generate a short rising beep tone
+            // Generate a short beep tone for loot proximity
             int sampleRate = 44100;
-            float duration = 0.15f;
+            float duration = 0.1f;
             int sampleCount = (int)(sampleRate * duration);
             float[] samples = new float[sampleCount];
             for (int i = 0; i < sampleCount; i++)
             {
                 float t = (float)i / sampleRate;
-                float freq = 600f + 400f * (t / duration); // rising from 600 to 1000 Hz
-                samples[i] = Mathf.Sin(2f * Mathf.PI * freq * t) * 0.5f;
+                float envelope = 1f - (t / duration); // fade out
+                samples[i] = Mathf.Sin(2f * Mathf.PI * 880f * t) * 0.4f * envelope;
             }
-            _pickupBeep = AudioClip.Create("PickupBeep", sampleCount, 1, sampleRate, false);
-            _pickupBeep.SetData(samples, 0);
+            _lootBeep = AudioClip.Create("LootBeep", sampleCount, 1, sampleRate, false);
+            _lootBeep.SetData(samples, 0);
 
-            // Create a dedicated 2D AudioSource so the beep is always audible
-            _audioSource = player.gameObject.AddComponent<AudioSource>();
-            _audioSource.spatialBlend = 0f; // fully 2D
-            _audioSource.volume = 1f;
-            _audioSource.playOnAwake = false;
+            // Create a dedicated 2D AudioSource
+            _lootAudioSource = player.gameObject.AddComponent<AudioSource>();
+            _lootAudioSource.spatialBlend = 0f; // fully 2D
+            _lootAudioSource.volume = 0.6f;
+            _lootAudioSource.playOnAwake = false;
         }
 
-        private void PlayPickupBeep()
+        private void CheckLootProximityBeep(CharacterMultiplayer player)
         {
-            if (_audioSource != null && _pickupBeep != null)
-                _audioSource.PlayOneShot(_pickupBeep);
+            _lootBeepTimer -= ScanInterval;
+
+            if (GameManager.Instance == null) return;
+            var pickupsMgr = GameManager.Instance.GetComponent<PickupsManager>();
+            if (pickupsMgr == null) return;
+
+            Vector3 playerPos = player.transform.position;
+            float closestDist = float.MaxValue;
+
+            foreach (var box in pickupsMgr.ammoBoxes)
+            {
+                if (box == null || box.items == null || box.items.Count == 0) continue;
+                float dist = Vector3.Distance(playerPos, box.transform.position);
+                if (dist < LootScanRadius && dist < closestDist)
+                    closestDist = dist;
+            }
+
+            if (closestDist >= LootScanRadius) return;
+
+            // Beep faster when closer: lerp interval from max (far) to min (close)
+            float t = Mathf.InverseLerp(LootScanRadius, 0.5f, closestDist);
+            float interval = Mathf.Lerp(LootBeepMaxInterval, LootBeepMinInterval, t);
+
+            if (_lootBeepTimer <= 0f)
+            {
+                _lootBeepTimer = interval;
+                if (_lootAudioSource != null && _lootBeep != null)
+                {
+                    // Vary pitch slightly based on distance (higher = closer)
+                    _lootAudioSource.pitch = Mathf.Lerp(0.8f, 1.3f, t);
+                    _lootAudioSource.PlayOneShot(_lootBeep);
+                }
+            }
         }
 
         private void CheckPickupConfirmation(CharacterMultiplayer player)
@@ -311,7 +346,6 @@ namespace AccessibilityMod
                 {
                     string name = !string.IsNullOrEmpty(_lastPickItem.short_description)
                         ? _lastPickItem.short_description : _lastPickItem.description;
-                    PlayPickupBeep();
                     ScreenReaderManager.Speak($"Picked up {name}");
 
                     // Force re-announce remaining loot
@@ -326,18 +360,24 @@ namespace AccessibilityMod
 
         private void CheckWeaponDraw(CharacterMultiplayer player)
         {
-            var character = player.GetComponent<Character>();
-            if (character == null) return;
+            var charInv = player.GetComponent<CharacterInventory>();
+            if (charInv == null) return;
 
-            var weapon = character.GetEquippedWeapon();
-            if (weapon == null) return;
+            // Use CharacterInventory to get the actual weapon the player picked up
+            // Skip the default "Handgun 01" that the game always assigns
+            bool hasRealWeapon = charInv.weapon1 != null && charInv.weapon1.name != "Handgun 01";
+            bool hasWeapon2 = charInv.weapon2 != null;
+            if (!hasRealWeapon && !hasWeapon2) return;
 
-            string weaponName = weapon.GetWeaponName();
-            if (string.IsNullOrEmpty(weaponName)) return;
+            int slot = charInv.GetCurrentWeapon();
+            var invItem = slot == 0 ? charInv.weapon1 : charInv.weapon2;
+            if (invItem == null) return;
+
+            string weaponName = !string.IsNullOrEmpty(invItem.short_description)
+                ? invItem.short_description : invItem.name;
 
             if (weaponName != _lastWeaponName)
             {
-                // Don't announce on first detection (game start)
                 if (_lastWeaponName != null)
                     ScreenReaderManager.Speak(weaponName);
 

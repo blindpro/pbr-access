@@ -9,6 +9,7 @@ namespace AccessibilityMod
         private HudReader _hudReader;
         private AccessibleInputController _inputController;
         private NavigationAssistant _navigationAssistant;
+        private AimAssist _aimAssist;
         private bool _hasSpokenReady;
 
         private void Awake()
@@ -17,6 +18,7 @@ namespace AccessibilityMod
             _hudReader = new HudReader();
             _inputController = new AccessibleInputController();
             _navigationAssistant = new NavigationAssistant();
+            _aimAssist = new AimAssist();
         }
 
         private void Update()
@@ -33,6 +35,7 @@ namespace AccessibilityMod
                 _hudReader.Tick();
                 _inputController.Tick();
                 _navigationAssistant.Tick();
+                _aimAssist.Tick();
             }
             catch (Exception ex)
             {
