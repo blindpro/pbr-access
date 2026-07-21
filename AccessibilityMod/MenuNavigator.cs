@@ -21,6 +21,10 @@ namespace AccessibilityMod
 
         public void Tick()
         {
+            // The loot list borrows Up, Down and Enter while it is open; HUD
+            // buttons must not answer them at the same time.
+            if (LootMenu.IsOpen) return;
+
             // Periodically rescan for selectables
             if (Time.unscaledTime >= _nextRescanTime)
             {

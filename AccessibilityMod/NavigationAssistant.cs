@@ -541,6 +541,15 @@ namespace AccessibilityMod
             var currentPickItem = pickupsMgr.pickItem;
             var currentPickBox = pickupsMgr.pickAmmoBox;
 
+            // The loot list announces its own takes - it knows which item the
+            // player chose, which this heuristic cannot see.
+            if (LootMenu.SuppressesPickupSpeech)
+            {
+                _lastPickItem = null;
+                _lastPickBox = null;
+                return;
+            }
+
             // Only announce when an item was actually removed from a box's items list.
             // Checking pickItem alone causes false positives when the player looks away
             // (pickItem goes null in LateUpdate even though nothing was picked up).

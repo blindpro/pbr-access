@@ -16,6 +16,19 @@ namespace AccessibilityMod
         private const float AccessiblePickRange = 3.5f;
 
         /// <summary>
+        /// The game's own interact key also calls PickCurrentItem, which grabs
+        /// whatever the camera ray found - the very ambiguity the loot list exists
+        /// to remove. Only the loot list gets to pick, so pressing E opens the list
+        /// instead of silently taking an item at the same time.
+        /// </summary>
+        [HarmonyPrefix]
+        [HarmonyPatch(typeof(PickupsManager), "PickCurrentItem")]
+        static bool PickupsManager_PickCurrentItem_Prefix()
+        {
+            return LootMenu.IsPicking;
+        }
+
+        /// <summary>
         /// After PickupsManager.Start, increase the pick range.
         /// </summary>
         [HarmonyPostfix]

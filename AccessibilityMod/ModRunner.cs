@@ -11,6 +11,7 @@ namespace AccessibilityMod
         private NavigationAssistant _navigationAssistant;
         private AimAssist _aimAssist;
         private AudioTargeting _audioTargeting;
+        private LootMenu _lootMenu;
         private bool _hasSpokenReady;
 
         private void Awake()
@@ -21,6 +22,7 @@ namespace AccessibilityMod
             _navigationAssistant = new NavigationAssistant();
             _aimAssist = new AimAssist();
             _audioTargeting = new AudioTargeting();
+            _lootMenu = new LootMenu();
         }
 
         private void Update()
@@ -33,6 +35,9 @@ namespace AccessibilityMod
                     ScreenReaderManager.Speak("Accessibility mod ready");
                 }
 
+                // The loot list runs first: it claims E, Up, Down and Enter while
+                // it is open, before anything else can act on them.
+                _lootMenu.Tick();
                 _menuNavigator.Tick();
                 _hudReader.Tick();
                 _inputController.Tick();

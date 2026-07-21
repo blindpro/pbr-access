@@ -10,6 +10,9 @@ namespace AccessibilityMod
     /// - Left Control: fire weapon
     /// - Left/Right Arrow: turn character
     /// - F: announce compass facing direction
+    ///
+    /// E (pick up loot) is handled by <see cref="LootMenu"/>, which has to own the
+    /// key because a pile of several items needs a list rather than one action.
     /// </summary>
     public class AccessibleInputController
     {
@@ -62,7 +65,6 @@ namespace AccessibilityMod
             HandleFire(character);
             HandleTurning(player);
             HandleFacingReadout(player);
-            HandlePickup();
         }
 
         private void HandleFire(Character character)
@@ -140,49 +142,6 @@ namespace AccessibilityMod
             int degrees = Mathf.RoundToInt(yaw);
 
             ScreenReaderManager.Speak($"{cardinal}, {degrees} degrees");
-        }
-
-        private void HandlePickup()
-        {
-            if (!Input.GetKeyDown(KeyCode.E)) return;
-
-            if (GameManager.Instance == null) return;
-            var pickupsMgr = GameManager.Instance.GetComponent<PickupsManager>();
-            if (pickupsMgr == null) return;
-
-            // If there's already a targeted item (from looking or auto-target), pick it
-            if (pickupsMgr.pickAmmoBox != null && pickupsMgr.pickAmmoBox.currentItem != null)
-            {
-                pickupsMgr.PickCurrentItem();
-                return;
-            }
-
-            // Otherwise find the nearest box within range and pick its first item
-            var player = CharacterMultiplayer.GetMainPlayer();
-            if (player == null) return;
-
-            Vector3 playerPos = player.transform.position;
-            AmmoBox closestBox = null;
-            float closestDist = float.MaxValue;
-
-            foreach (var box in pickupsMgr.ammoBoxes)
-            {
-                if (box == null || box.items == null || box.items.Count == 0) continue;
-                float dist = Vector3.Distance(playerPos, box.transform.position);
-                if (dist < pickupsMgr.pickRange && dist < closestDist)
-                {
-                    closestDist = dist;
-                    closestBox = box;
-                }
-            }
-
-            if (closestBox != null && closestBox.items.Count > 0)
-            {
-                closestBox.currentItem = closestBox.items[0];
-                pickupsMgr.pickAmmoBox = closestBox;
-                pickupsMgr.pickItem = closestBox.items[0];
-                pickupsMgr.PickCurrentItem();
-            }
         }
 
         private static string GetCardinalDirection(float yaw)

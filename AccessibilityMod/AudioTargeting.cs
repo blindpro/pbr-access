@@ -290,7 +290,7 @@ namespace AccessibilityMod
         /// Enemies only: not us, not the local player, not a squad mate, not a
         /// spectator, and still alive.
         /// </summary>
-        private static bool IsHostile(CharacterMultiplayer player, CharacterMultiplayer other)
+        internal static bool IsHostile(CharacterMultiplayer player, CharacterMultiplayer other)
         {
             if (other == null || other == player) return false;
             if (other.isMainPlayer || other.isSpectating) return false;
@@ -659,7 +659,7 @@ namespace AccessibilityMod
             return "behind";
         }
 
-        private static int GetObstacleMask()
+        internal static int GetObstacleMask()
         {
             int mask = 1 << 0; // Default
             int ground = LayerMask.NameToLayer("Ground");
