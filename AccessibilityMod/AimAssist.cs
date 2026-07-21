@@ -13,24 +13,31 @@ namespace AccessibilityMod
     ///   so the last few degrees onto a target close themselves instead of having
     ///   to be found by ear
     ///
-    /// Pitch is the reason this exists in its current form: the shot follows the
-    /// camera, and the camera's pitch lives on the CameraLook transform, not on
-    /// the character. Correcting yaw alone left the aim permanently above or below
-    /// the target, so a lock never quite closed.
+    /// Everything is measured on the shot ray itself - the fps camera's position
+    /// and forward, which is the exact ray ThirdPerson.ComputeLookAtRaycast fires
+    /// and the only thing that decides damage. Steering used to be judged against
+    /// the body's forward and the CameraLook pivot's own frame instead, so the
+    /// assist would centre the body, declare itself settled, and leave the shot ray
+    /// pointing wherever the rig's offset put it. That leftover error is invisible
+    /// to the assist but not to the lock tone, which is why the lock never closed.
     /// </summary>
     public class AimAssist
     {
         // While firing, anything in this cone is fair game.
         private const float FireConeAngle = 30f;
-        // Before firing the assist is only allowed to bite once the player has
-        // already brought the crosshair close, so free look is never hijacked.
-        private const float StickyConeAngle = 10f;
+        // Before firing the assist bites over a wider cone than it used to, but
+        // gently at the edges: the beep ramp spans 90 degrees, so a 10 degree cone
+        // meant no help at all through almost the whole turn onto a target.
+        private const float StickyConeAngle = 20f;
         private const float AssistMaxRange = 80f;
 
-        // Degrees per second. Firing is a commitment, so it steers hard; the
-        // pre-fire magnetism is a nudge, not a snap.
+        // Degrees per second. Firing is a commitment, so it steers hard.
         private const float FireTurnSpeed = 120f;
-        private const float StickyTurnSpeed = 35f;
+        // Pre-fire the pull ramps with how centred the enemy already is: a nudge out
+        // at the edge of the cone, firm over the last few degrees where the aim has
+        // to actually settle onto a body that is moving.
+        private const float StickyTurnSpeedFar = 35f;
+        private const float StickyTurnSpeedNear = 140f;
 
         // Below this the aim is already on target - stop, or it jitters. It has to
         // be tiny: the game only damages what its single camera ray strikes, and at
@@ -82,11 +89,22 @@ namespace AccessibilityMod
 
             GetAim(player, cameraLook, out Vector3 origin, out Vector3 aimDir);
 
-            _target = FindTarget(player, origin, aimDir, isFiring ? FireConeAngle : StickyConeAngle);
+            float cone = isFiring ? FireConeAngle : StickyConeAngle;
+            _target = FindTarget(player, origin, aimDir, cone);
             if (_target == null) return;
 
-            float speed = isFiring ? FireTurnSpeed : StickyTurnSpeed;
-            Steer(player, cameraLook, origin, _target, speed * Time.deltaTime);
+            float speed;
+            if (isFiring)
+            {
+                speed = FireTurnSpeed;
+            }
+            else
+            {
+                float centred = 1f - Mathf.Clamp01(Vector3.Angle(aimDir, _aimPoint - origin) / cone);
+                speed = Mathf.Lerp(StickyTurnSpeedFar, StickyTurnSpeedNear, centred);
+            }
+
+            Steer(player, cameraLook, origin, aimDir, speed * Time.deltaTime);
         }
 
         /// <summary>
@@ -131,19 +149,26 @@ namespace AccessibilityMod
         /// each axis, matching how the game itself applies look input: yaw is
         /// post-multiplied onto the character, pitch onto the camera pivot, and the
         /// CameraLook fields are kept in step so smoothed look mode agrees.
+        ///
+        /// Both errors are the difference between where the shot ray currently
+        /// points and where the target is, never between a rig transform and the
+        /// target. The camera hangs off the body and the pivot, so a degree of body
+        /// yaw or pivot pitch is a degree of ray yaw or pitch - which makes the
+        /// error directly applicable, and makes any fixed offset between the rig
+        /// and the camera something the loop drives out instead of settling into.
         /// </summary>
         private void Steer(CharacterMultiplayer player, CameraLook cameraLook, Vector3 origin,
-            CharacterMultiplayer target, float maxStep)
+            Vector3 aimDir, float maxStep)
         {
             Vector3 toTarget = _aimPoint - origin;
+            if (toTarget.sqrMagnitude < 0.0001f || aimDir.sqrMagnitude < 0.0001f) return;
 
             // Yaw: turn the body, exactly as arrow-key turning does.
             Vector3 flatTo = new Vector3(toTarget.x, 0f, toTarget.z);
-            Vector3 flatForward = player.transform.forward;
-            flatForward.y = 0f;
-            if (flatTo.sqrMagnitude > 0.0001f && flatForward.sqrMagnitude > 0.0001f)
+            Vector3 flatAim = new Vector3(aimDir.x, 0f, aimDir.z);
+            if (flatTo.sqrMagnitude > 0.0001f && flatAim.sqrMagnitude > 0.0001f)
             {
-                float yawError = Vector3.SignedAngle(flatForward, flatTo, Vector3.up);
+                float yawError = Vector3.SignedAngle(flatAim, flatTo, Vector3.up);
                 if (Mathf.Abs(yawError) > SettleAngle)
                 {
                     Quaternion turn = Quaternion.Euler(0f, Mathf.Clamp(yawError, -maxStep, maxStep), 0f);
@@ -157,11 +182,10 @@ namespace AccessibilityMod
                 }
             }
 
-            // Pitch: recomputed after the yaw step so it measures against where the
-            // camera now points. The game clamps this to its own limits next frame.
-            Vector3 local = cameraLook.transform.InverseTransformDirection(toTarget);
-            float horizontal = new Vector2(local.x, local.z).magnitude;
-            float pitchError = -Mathf.Atan2(local.y, horizontal) * Mathf.Rad2Deg;
+            // Pitch, as the difference of the two elevation angles. Elevation does
+            // not change when the body yaws, so this stays correct alongside the
+            // yaw step above. The game clamps it to its own limits next frame.
+            float pitchError = Elevation(aimDir) - Elevation(toTarget);
             if (Mathf.Abs(pitchError) > SettleAngle)
             {
                 Quaternion look = Quaternion.Euler(Mathf.Clamp(pitchError, -maxStep, maxStep), 0f, 0f);
@@ -173,6 +197,16 @@ namespace AccessibilityMod
                     _rotationCamera.SetValue(cameraLook, rot * look);
                 }
             }
+        }
+
+        /// <summary>
+        /// Degrees above the horizon, signed the way the game's pitch is: positive
+        /// is looking down, matching Quaternion.Euler's x axis.
+        /// </summary>
+        private static float Elevation(Vector3 direction)
+        {
+            float horizontal = new Vector2(direction.x, direction.z).magnitude;
+            return -Mathf.Atan2(direction.y, horizontal) * Mathf.Rad2Deg;
         }
 
         private static void GetAim(CharacterMultiplayer player, CameraLook cameraLook,
