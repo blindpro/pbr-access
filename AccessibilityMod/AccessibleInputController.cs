@@ -22,6 +22,12 @@ namespace AccessibilityMod
             AccessTools.Field(typeof(Character), "shotsFired");
         private static readonly FieldInfo _cursorLocked =
             AccessTools.Field(typeof(Character), "cursorLocked");
+        private static readonly FieldInfo _lastShotTime =
+            AccessTools.Field(typeof(Character), "lastShotTime");
+        private static readonly MethodInfo _fireMethod =
+            AccessTools.Method(typeof(Character), "Fire");
+        private static readonly MethodInfo _canPlayAnimationFire =
+            AccessTools.Method(typeof(Character), "CanPlayAnimationFire");
 
         // CameraLook rotation state - we modify this directly to avoid
         // the axisLook persistence bug that causes continuous spinning
@@ -56,12 +62,12 @@ namespace AccessibilityMod
             HandleFire(character);
             HandleTurning(player);
             HandleFacingReadout(player);
+            HandlePickup();
         }
 
         private void HandleFire(Character character)
         {
             bool fireDown = Input.GetKeyDown(KeyCode.LeftControl);
-            bool fireHeld = Input.GetKey(KeyCode.LeftControl);
             bool fireUp = Input.GetKeyUp(KeyCode.LeftControl);
 
             if (fireDown)
@@ -69,6 +75,20 @@ namespace AccessibilityMod
                 _holdingButtonFire.SetValue(character, true);
                 _shotsFired.SetValue(character, 0);
                 _wasFiring = true;
+
+                // For non-automatic weapons, Fire() must be called explicitly
+                // (automatic weapons fire continuously in Update via holdingButtonFire)
+                var weapon = character.GetEquippedWeapon();
+                if (weapon != null && !weapon.IsAutomatic()
+                    && weapon.HasAmmunition()
+                    && (bool)_canPlayAnimationFire.Invoke(character, null))
+                {
+                    float lastShot = (float)_lastShotTime.GetValue(character);
+                    if (Time.time - lastShot > 60f / weapon.GetRateOfFire())
+                    {
+                        _fireMethod.Invoke(character, null);
+                    }
+                }
             }
 
             if (fireUp)
@@ -120,6 +140,49 @@ namespace AccessibilityMod
             int degrees = Mathf.RoundToInt(yaw);
 
             ScreenReaderManager.Speak($"{cardinal}, {degrees} degrees");
+        }
+
+        private void HandlePickup()
+        {
+            if (!Input.GetKeyDown(KeyCode.E)) return;
+
+            if (GameManager.Instance == null) return;
+            var pickupsMgr = GameManager.Instance.GetComponent<PickupsManager>();
+            if (pickupsMgr == null) return;
+
+            // If there's already a targeted item (from looking or auto-target), pick it
+            if (pickupsMgr.pickAmmoBox != null && pickupsMgr.pickAmmoBox.currentItem != null)
+            {
+                pickupsMgr.PickCurrentItem();
+                return;
+            }
+
+            // Otherwise find the nearest box within range and pick its first item
+            var player = CharacterMultiplayer.GetMainPlayer();
+            if (player == null) return;
+
+            Vector3 playerPos = player.transform.position;
+            AmmoBox closestBox = null;
+            float closestDist = float.MaxValue;
+
+            foreach (var box in pickupsMgr.ammoBoxes)
+            {
+                if (box == null || box.items == null || box.items.Count == 0) continue;
+                float dist = Vector3.Distance(playerPos, box.transform.position);
+                if (dist < pickupsMgr.pickRange && dist < closestDist)
+                {
+                    closestDist = dist;
+                    closestBox = box;
+                }
+            }
+
+            if (closestBox != null && closestBox.items.Count > 0)
+            {
+                closestBox.currentItem = closestBox.items[0];
+                pickupsMgr.pickAmmoBox = closestBox;
+                pickupsMgr.pickItem = closestBox.items[0];
+                pickupsMgr.PickCurrentItem();
+            }
         }
 
         private static string GetCardinalDirection(float yaw)

@@ -40,9 +40,8 @@ namespace AccessibilityMod
         private PickupsManager.Item _lastPickItem;
         private AmmoBox _lastPickBox;
 
-        // Loot proximity audio cue
+        // Loot proximity audio cue (spatial 3D at loot position)
         private AudioClip _lootBeep;
-        private AudioSource _lootAudioSource;
         private float _lootBeepTimer;
         private const float LootBeepMaxInterval = 1.5f; // far away beep rate
         private const float LootBeepMinInterval = 0.3f; // close beep rate
@@ -268,23 +267,17 @@ namespace AccessibilityMod
 
             // Generate a short beep tone for loot proximity
             int sampleRate = 44100;
-            float duration = 0.1f;
+            float duration = 0.12f;
             int sampleCount = (int)(sampleRate * duration);
             float[] samples = new float[sampleCount];
             for (int i = 0; i < sampleCount; i++)
             {
                 float t = (float)i / sampleRate;
                 float envelope = 1f - (t / duration); // fade out
-                samples[i] = Mathf.Sin(2f * Mathf.PI * 880f * t) * 0.4f * envelope;
+                samples[i] = Mathf.Sin(2f * Mathf.PI * 880f * t) * 0.5f * envelope;
             }
             _lootBeep = AudioClip.Create("LootBeep", sampleCount, 1, sampleRate, false);
             _lootBeep.SetData(samples, 0);
-
-            // Create a dedicated 2D AudioSource
-            _lootAudioSource = player.gameObject.AddComponent<AudioSource>();
-            _lootAudioSource.spatialBlend = 0f; // fully 2D
-            _lootAudioSource.volume = 0.6f;
-            _lootAudioSource.playOnAwake = false;
         }
 
         private void CheckLootProximityBeep(CharacterMultiplayer player)
@@ -296,6 +289,7 @@ namespace AccessibilityMod
             if (pickupsMgr == null) return;
 
             Vector3 playerPos = player.transform.position;
+            AmmoBox closestBox = null;
             float closestDist = float.MaxValue;
 
             foreach (var box in pickupsMgr.ammoBoxes)
@@ -303,25 +297,44 @@ namespace AccessibilityMod
                 if (box == null || box.items == null || box.items.Count == 0) continue;
                 float dist = Vector3.Distance(playerPos, box.transform.position);
                 if (dist < LootScanRadius && dist < closestDist)
+                {
                     closestDist = dist;
+                    closestBox = box;
+                }
             }
 
-            if (closestDist >= LootScanRadius) return;
+            if (closestBox == null || closestDist >= LootScanRadius) return;
 
-            // Beep faster when closer: lerp interval from max (far) to min (close)
+            // Beep faster when closer
             float t = Mathf.InverseLerp(LootScanRadius, 0.5f, closestDist);
             float interval = Mathf.Lerp(LootBeepMaxInterval, LootBeepMinInterval, t);
 
             if (_lootBeepTimer <= 0f)
             {
                 _lootBeepTimer = interval;
-                if (_lootAudioSource != null && _lootBeep != null)
+                if (_lootBeep != null)
                 {
-                    // Vary pitch slightly based on distance (higher = closer)
-                    _lootAudioSource.pitch = Mathf.Lerp(0.8f, 1.3f, t);
-                    _lootAudioSource.PlayOneShot(_lootBeep);
+                    // Play at the loot box's world position as 3D spatial audio
+                    PlaySpatialBeep(closestBox.transform.position, Mathf.Lerp(0.5f, 1f, t));
                 }
             }
+        }
+
+        private void PlaySpatialBeep(Vector3 position, float volume)
+        {
+            // Create a temporary GameObject with an AudioSource at the loot position
+            var tempObj = new GameObject("LootBeepTemp");
+            tempObj.transform.position = position;
+            var source = tempObj.AddComponent<AudioSource>();
+            source.clip = _lootBeep;
+            source.spatialBlend = 1f; // fully 3D
+            source.rolloffMode = AudioRolloffMode.Linear;
+            source.minDistance = 1f;
+            source.maxDistance = LootScanRadius + 2f;
+            source.volume = volume;
+            source.Play();
+            // Destroy after the clip finishes
+            Object.Destroy(tempObj, _lootBeep.length + 0.1f);
         }
 
         private void CheckPickupConfirmation(CharacterMultiplayer player)
@@ -330,32 +343,35 @@ namespace AccessibilityMod
             var pickupsMgr = GameManager.Instance.GetComponent<PickupsManager>();
             if (pickupsMgr == null) return;
 
-            // Detect when an item is picked up by watching the pickItem field
             var currentPickItem = pickupsMgr.pickItem;
             var currentPickBox = pickupsMgr.pickAmmoBox;
 
-            // If pickItem just went null but we had one before, something was picked up
-            // OR if the box's item count decreased
-            if (_lastPickBox != null && _lastPickItem != null)
+            // Only announce when an item was actually removed from a box's items list.
+            // Checking pickItem alone causes false positives when the player looks away
+            // (pickItem goes null in LateUpdate even though nothing was picked up).
+            if (_lastPickBox != null && _lastPickItem != null
+                && _lastPickBox.items != null
+                && !_lastPickBox.items.Contains(_lastPickItem))
             {
-                bool itemGone = currentPickItem != _lastPickItem;
-                bool boxLostItem = _lastPickBox != null && _lastPickBox.items != null
-                    && !_lastPickBox.items.Contains(_lastPickItem);
+                string name = !string.IsNullOrEmpty(_lastPickItem.short_description)
+                    ? _lastPickItem.short_description : _lastPickItem.description;
+                ScreenReaderManager.Speak($"Picked up {name}");
 
-                if (itemGone || boxLostItem)
-                {
-                    string name = !string.IsNullOrEmpty(_lastPickItem.short_description)
-                        ? _lastPickItem.short_description : _lastPickItem.description;
-                    ScreenReaderManager.Speak($"Picked up {name}");
+                // Force re-announce remaining loot
+                _lastAnnouncedBox = null;
+                _lootAnnounceTimer = 0.5f;
 
-                    // Force re-announce remaining loot
-                    _lastAnnouncedBox = null;
-                    _lootAnnounceTimer = 0.5f;
-                }
+                // Clear so we don't re-trigger
+                _lastPickItem = null;
+                _lastPickBox = null;
             }
 
-            _lastPickItem = currentPickItem;
-            _lastPickBox = currentPickBox;
+            // Track current state - only update when there's a real target
+            if (currentPickItem != null)
+            {
+                _lastPickItem = currentPickItem;
+                _lastPickBox = currentPickBox;
+            }
         }
 
         private void CheckWeaponDraw(CharacterMultiplayer player)
