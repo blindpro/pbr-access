@@ -21,3 +21,4 @@ Desktop.ini
 ## IDE
 .idea/
 *.sln.DotSettings.user
+*.claude/

@@ -12,6 +12,7 @@ namespace AccessibilityMod
         private AimAssist _aimAssist;
         private AudioTargeting _audioTargeting;
         private LootMenu _lootMenu;
+        private SafeZoneNav _safeZoneNav;
         private bool _hasSpokenReady;
 
         private void Awake()
@@ -23,6 +24,7 @@ namespace AccessibilityMod
             _aimAssist = new AimAssist();
             _audioTargeting = new AudioTargeting();
             _lootMenu = new LootMenu();
+            _safeZoneNav = new SafeZoneNav();
         }
 
         private void Update()
@@ -44,6 +46,7 @@ namespace AccessibilityMod
                 _navigationAssistant.Tick();
                 _aimAssist.Tick();
                 _audioTargeting.Tick();
+                _safeZoneNav.Tick();
                 HitAnnouncer.Tick();
             }
             catch (Exception ex)
