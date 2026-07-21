@@ -46,6 +46,17 @@ namespace AccessibilityMod
         private const float LockAngleMax = 18f;
         private const float LockExitMultiplier = 1.5f; // hysteresis so lock doesn't flicker
 
+        // Forgiveness radius for the "would this shot land" sweep, in meters. A
+        // plain ray only locks on a pixel-perfect line, which at 20 m is a three
+        // degree window - unfindable by ear. Sweeping a sphere of roughly torso
+        // width means the lock engages when the shot lands or very nearly does.
+        private const float LockSweepRadius = 0.5f;
+
+        // Near-lock: the missing final approach cue. Between the lock threshold and
+        // this multiple of it, a pulsing tone plays - "one nudge away" - so the last
+        // few degrees are audible instead of a silent gap before the solid tone.
+        private const float NearLockMultiplier = 2.5f;
+
         // Positional beep pacing: slower and lower when the enemy is off to the
         // side, faster and higher as the crosshair approaches center.
         private const float BeepSlowInterval = 0.9f;
@@ -80,8 +91,11 @@ namespace AccessibilityMod
         private AudioClip _enemyBeep;
         private AudioClip _blockedBeep;
         private AudioClip _lockTone;
+        private AudioClip _nearLockTone;
         private AudioSource _lockSource;
+        private AudioSource _nearLockSource;
         private bool _locked;
+        private bool _nearLocked;
         private bool _spokeNoAmmo;
 
         private CharacterMultiplayer _currentTarget;
@@ -191,7 +205,7 @@ namespace AccessibilityMod
                 Mathf.Atan2(LockTargetHalfWidth, bestDist) * Mathf.Rad2Deg,
                 LockAngleMin, LockAngleMax);
 
-            // Hysteresis: easier to keep the lock than to acquire it. A ray that
+            // Hysteresis: easier to keep the lock than to acquire it. A sweep that
             // actually strikes the enemy always locks, however wide the angle is -
             // the tone must never be missing when the shot genuinely connects.
             bool wantLock = _locked
@@ -199,6 +213,10 @@ namespace AccessibilityMod
                 : bestAngle <= lockAngle;
             if (!wantLock)
                 wantLock = IsShotOnTarget(player, aimOrigin, aimDir, maxRange, best);
+
+            // Just outside the lock: pulse, so the player can hear the last few
+            // degrees closing instead of hunting a silent window.
+            bool wantNearLock = !wantLock && bestAngle <= lockAngle * NearLockMultiplier;
 
             // An empty gun cannot land a shot, so the lock tone would be a lie.
             // Say "reload" once instead and keep the tone silent.
@@ -211,6 +229,7 @@ namespace AccessibilityMod
                     ScreenReaderManager.Speak("Reload");
                 }
                 wantLock = false;
+                wantNearLock = false;
             }
             else
             {
@@ -219,11 +238,18 @@ namespace AccessibilityMod
 
             if (wantLock)
             {
+                StopNearLock();
                 StartLock();
+            }
+            else if (wantNearLock)
+            {
+                StopLock();
+                StartNearLock();
             }
             else
             {
                 StopLock();
+                StopNearLock();
 
                 // Beep faster AND higher as the crosshair nears the enemy, so
                 // there are two independent cues for closing in on the lock.
@@ -256,6 +282,7 @@ namespace AccessibilityMod
         private void ClearTarget()
         {
             StopLock();
+            StopNearLock();
             _currentTarget = null;
         }
 
@@ -282,7 +309,8 @@ namespace AccessibilityMod
             // Start just ahead of the camera so the player's own body, arms and
             // weapon model are never mistaken for cover.
             Vector3 start = origin + dir * 0.5f;
-            RaycastHit[] hits = Physics.RaycastAll(start, dir, range, ~0, QueryTriggerInteraction.Ignore);
+            RaycastHit[] hits = Physics.SphereCastAll(start, LockSweepRadius, dir, range,
+                ~0, QueryTriggerInteraction.Ignore);
             if (hits.Length == 0) return false;
 
             System.Array.Sort(hits, (a, b) => a.distance.CompareTo(b.distance));
@@ -295,11 +323,13 @@ namespace AccessibilityMod
                 // take - held weapons included, which have no character component.
                 if (character == player) continue;
                 if (hit.collider.transform.IsChildOf(player.transform)) continue;
+                // First character the sweep touches decides it: the target means the
+                // shot lands, anyone else means they are in the way.
                 if (character != null) return character == target;
 
-                // Anything solid reached first blocks the shot.
-                if ((GetObstacleMask() & (1 << hit.collider.gameObject.layer)) != 0)
-                    return false;
+                // Geometry is deliberately ignored here. The sweep has width, so it
+                // clips walls merely *beside* a clear shot; the precise line of sight
+                // ray in the scan loop has already ruled out real cover.
             }
 
             return false;
@@ -433,6 +463,22 @@ namespace AccessibilityMod
                 _lockSource.Stop();
         }
 
+        private void StartNearLock()
+        {
+            if (_nearLocked && _nearLockSource != null && _nearLockSource.isPlaying) return;
+            _nearLocked = true;
+            EnsureNearLockSource();
+            if (_nearLockSource != null && !_nearLockSource.isPlaying)
+                _nearLockSource.Play();
+        }
+
+        private void StopNearLock()
+        {
+            _nearLocked = false;
+            if (_nearLockSource != null && _nearLockSource.isPlaying)
+                _nearLockSource.Stop();
+        }
+
         private void GetAim(CharacterMultiplayer player, out Vector3 origin, out Vector3 dir)
         {
             var tp = player.GetComponent<ThirdPerson>();
@@ -509,6 +555,28 @@ namespace AccessibilityMod
                 _blockedBeep.SetData(samples, 0);
             }
 
+            // Near-lock tone: the same 990 Hz voice as the lock, but chopped into
+            // fast pulses. Sharing the pitch is the point - the player hears the
+            // pulses fuse into the solid lock tone as they settle onto the target.
+            if (_nearLockTone == null)
+            {
+                const float freq = 990f;
+                const float pulse = 0.06f; // 59.4 whole cycles - starts and ends near zero
+                float duration = pulse * 2f;
+                int sampleCount = (int)(sampleRate * duration);
+                float[] samples = new float[sampleCount];
+                for (int i = 0; i < sampleCount; i++)
+                {
+                    float t = (float)i / sampleRate;
+                    if (t >= pulse) { samples[i] = 0f; continue; }
+                    // Soft edges so the loop does not click at the pulse boundary.
+                    float edge = Mathf.Min(t, pulse - t) / 0.01f;
+                    samples[i] = Mathf.Sin(2f * Mathf.PI * freq * t) * 0.35f * Mathf.Clamp01(edge);
+                }
+                _nearLockTone = AudioClip.Create("NearLockTone", sampleCount, 1, sampleRate, false);
+                _nearLockTone.SetData(samples, 0);
+            }
+
             // Lock tone: a steady, seamlessly-looping 990 Hz tone. 495 whole cycles
             // over 0.5s start and end at zero so the loop has no click.
             if (_lockTone == null)
@@ -525,6 +593,20 @@ namespace AccessibilityMod
                 _lockTone = AudioClip.Create("LockTone", sampleCount, 1, sampleRate, false);
                 _lockTone.SetData(samples, 0);
             }
+        }
+
+        private void EnsureNearLockSource()
+        {
+            if (_nearLockSource != null) return;
+
+            var obj = new GameObject("AudioTargetNearLock");
+            Object.DontDestroyOnLoad(obj);
+            _nearLockSource = obj.AddComponent<AudioSource>();
+            _nearLockSource.clip = _nearLockTone;
+            _nearLockSource.loop = true;
+            _nearLockSource.spatialBlend = 0f; // 2D, same as the lock it leads into
+            _nearLockSource.volume = 0.35f;    // quieter - it is a hint, not the signal
+            _nearLockSource.playOnAwake = false;
         }
 
         private void EnsureLockSource()

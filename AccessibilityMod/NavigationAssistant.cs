@@ -59,6 +59,14 @@ namespace AccessibilityMod
         private float _buildingReannounceTimer;
         private string _lastBuildingAnnounce;
 
+        // On-demand survey (B key)
+        private const float InteriorScanDistance = 20f;  // room-sized, not map-sized
+        private const float DoorwayProbeAngle = 14f;     // how far off-axis we look for a frame
+        private const float DoorwayProbeDistance = 6f;   // a frame that close means a doorway
+        private const float SurveySweepStep = 22.5f;     // 16 rays around the circle
+        private const float SurveyMergeArc = 45f;        // one building claims this much arc
+        private const int SurveyMaxBuildings = 3;        // beyond this it stops being a sentence
+
         // Indoor/outdoor detection
         private const float CeilingCheckHeight = 20f;
         private bool _isIndoors;
@@ -82,6 +90,12 @@ namespace AccessibilityMod
             if (MatchmakingManager.Instance == null) return;
             var status = MatchmakingManager.Instance.GetRoomStatus();
             if (status != MatchmakingManager.RoomStatus.Playing) return;
+
+            // On-demand survey. Checked before the parachute skip (it helps pick a
+            // landing spot) and before the scan gate, because GetKeyDown is true for
+            // a single frame and the gate would swallow most presses.
+            if (Input.GetKeyDown(KeyCode.B))
+                AnnounceSurroundings(player);
 
             // Skip during parachuting
             var parachute = player.GetComponent<CharacterParachute>();
@@ -609,13 +623,138 @@ namespace AccessibilityMod
             }
         }
 
+        /// <summary>
+        /// On-demand survey, bound to B. Indoors it reads the room out: which way
+        /// the exits are and how far the walls are. Outdoors it sweeps the full
+        /// circle for buildings, the same idea as the passive distance scanner but
+        /// covering every direction at once instead of only what is ahead.
+        /// </summary>
+        private void AnnounceSurroundings(CharacterMultiplayer player)
+        {
+            Vector3 origin = player.transform.position + Vector3.up * 1.5f;
+            bool indoors = Physics.Raycast(origin, Vector3.up, CeilingCheckHeight,
+                GetObstacleMask(), QueryTriggerInteraction.Ignore);
+
+            // Explicitly requested, so it interrupts whatever else was talking.
+            ScreenReaderManager.Speak(indoors ? DescribeInterior(player) : DescribeExterior(player));
+        }
+
+        /// <summary>
+        /// Reads the surrounding room: exits first, because those are what the
+        /// player acts on, then the walls that box them in. A clear line flanked by
+        /// close walls is a doorway; a clear line with nothing beside it is open space.
+        /// </summary>
+        private string DescribeInterior(CharacterMultiplayer player)
+        {
+            Vector3 origin = player.transform.position + Vector3.up * 1f;
+            Transform t = player.transform;
+            int mask = GetObstacleMask();
+
+            var exits = new List<string>();
+            var walls = new List<string>();
+
+            // Clockwise from straight ahead, so the report reads as a turn of the
+            // head rather than starting behind the player.
+            for (float sweep = 0f; sweep < 360f; sweep += 45f)
+            {
+                float angle = sweep > 180f ? sweep - 360f : sweep;
+                Vector3 dir = Quaternion.Euler(0, angle, 0) * t.forward;
+                string where = DirectionFromAngle(angle);
+
+                if (Physics.Raycast(origin, dir, out RaycastHit hit, InteriorScanDistance,
+                    mask, QueryTriggerInteraction.Ignore))
+                {
+                    walls.Add($"wall {where} {Mathf.RoundToInt(hit.distance)} meters");
+                    continue;
+                }
+
+                bool flankedLeft = Physics.Raycast(origin,
+                    Quaternion.Euler(0, angle - DoorwayProbeAngle, 0) * t.forward,
+                    DoorwayProbeDistance, mask, QueryTriggerInteraction.Ignore);
+                bool flankedRight = Physics.Raycast(origin,
+                    Quaternion.Euler(0, angle + DoorwayProbeAngle, 0) * t.forward,
+                    DoorwayProbeDistance, mask, QueryTriggerInteraction.Ignore);
+
+                exits.Add(flankedLeft && flankedRight ? $"doorway {where}" : $"opening {where}");
+            }
+
+            var parts = new List<string> { "Indoors" };
+            if (exits.Count == 0)
+                parts.Add("no exits in reach");
+            else
+                parts.AddRange(exits);
+            parts.AddRange(walls);
+
+            return string.Join(". ", parts.ToArray());
+        }
+
+        /// <summary>
+        /// Sweeps the full circle for buildings and reports the nearest few. Each
+        /// reported building claims a wide arc around itself, so one big structure
+        /// spanning several rays is announced once rather than three times.
+        /// </summary>
+        private string DescribeExterior(CharacterMultiplayer player)
+        {
+            Vector3 origin = player.transform.position + Vector3.up * 3f;
+            Transform t = player.transform;
+            int mask = GetObstacleMask();
+
+            var angles = new List<float>();
+            var distances = new List<float>();
+
+            for (float angle = -180f; angle < 180f; angle += SurveySweepStep)
+            {
+                Vector3 dir = Quaternion.Euler(0, angle, 0) * t.forward;
+
+                if (!Physics.Raycast(origin, dir, out RaycastHit hit, BuildingMaxDistance,
+                    mask, QueryTriggerInteraction.Ignore))
+                    continue;
+                if (!IsLikelyBuilding(origin, dir, hit)) continue;
+
+                angles.Add(angle);
+                distances.Add(hit.distance);
+            }
+
+            var found = new List<string>();
+            for (int reported = 0; reported < SurveyMaxBuildings; reported++)
+            {
+                int nearest = -1;
+                for (int i = 0; i < angles.Count; i++)
+                    if (nearest < 0 || distances[i] < distances[nearest]) nearest = i;
+                if (nearest < 0) break;
+
+                float bearing = angles[nearest];
+                found.Add($"building {DirectionFromAngle(bearing)} {Mathf.RoundToInt(distances[nearest])} meters");
+
+                // Drop every ray that plausibly belongs to the same structure.
+                for (int i = angles.Count - 1; i >= 0; i--)
+                {
+                    if (Mathf.Abs(Mathf.DeltaAngle(angles[i], bearing)) > SurveyMergeArc) continue;
+                    angles.RemoveAt(i);
+                    distances.RemoveAt(i);
+                }
+            }
+
+            if (found.Count == 0)
+                return $"Outdoors. No buildings within {(int)BuildingMaxDistance} meters";
+
+            var parts = new List<string> { "Outdoors" };
+            parts.AddRange(found);
+            return string.Join(". ", parts.ToArray());
+        }
+
         private static string GetRelativeDirection(Transform playerTransform, Vector3 targetPos)
         {
             Vector3 toTarget = targetPos - playerTransform.position;
             toTarget.y = 0;
 
             float angle = Vector3.SignedAngle(playerTransform.forward, toTarget, Vector3.up);
+            return DirectionFromAngle(angle);
+        }
 
+        /// <summary>Shared 8-way vocabulary, for a bearing relative to player forward.</summary>
+        private static string DirectionFromAngle(float angle)
+        {
             if (angle >= -22.5f && angle < 22.5f) return "ahead";
             if (angle >= 22.5f && angle < 67.5f) return "front right";
             if (angle >= 67.5f && angle < 112.5f) return "right";
