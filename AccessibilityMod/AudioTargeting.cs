@@ -50,9 +50,11 @@ namespace AccessibilityMod
         private const float LockHoldTime = 0.25f;
         private float _lockHold;
 
-        // Near-lock: the approach cue, a pulsing tone from a couple of body widths
-        // out, so the last few degrees are audible instead of a silent gap.
-        private const float NearLockAngle = 4f;
+        // Near-lock: the approach cue. Widened to meet the aim assist, whose yaw
+        // magnetism starts at 12 degrees - so the pulse arriving now means "keep
+        // coming, it has you", and the player learns one clear handover point
+        // instead of hunting through a silent gap for a lock that starts at zero.
+        private const float NearLockAngle = 10f;
 
         // Positional beep pacing: slower and lower when the enemy is off to the
         // side, faster and higher as the crosshair approaches center.
@@ -60,7 +62,13 @@ namespace AccessibilityMod
         private const float BeepFastInterval = 0.1f;
         private const float BeepCenteringWindow = 90f; // degrees over which the ramp happens
         private const float BeepPitchFar = 1f;
-        private const float BeepPitchNear = 1.8f;
+        private const float BeepPitchNear = 2.2f;
+        // Bends the ramp so most of its range is spent near the middle. Spread
+        // evenly across 90 degrees, the last stretch - the part that decides whether
+        // the turn arrives - moved the pitch and the rate too little to hear, and a
+        // cue the player cannot resolve is a cue that cannot be aimed by. At 3, half
+        // the audible change happens inside the final 20 degrees.
+        private const float BeepSharpness = 3f;
         private float _beepTimer;
 
         // Spoken situational awareness. Unlike targeting, this ignores line of
@@ -251,8 +259,11 @@ namespace AccessibilityMod
                 StopNearLock();
 
                 // Beep faster AND higher as the crosshair nears the enemy, so
-                // there are two independent cues for closing in on the lock.
-                float centering = 1f - Mathf.Clamp01(bestAngle / BeepCenteringWindow);
+                // there are two independent cues for closing in on the lock, and
+                // bend the ramp toward the middle so both stay audibly alive over
+                // the last stretch where the turn is actually won.
+                float off = Mathf.Clamp01(bestAngle / BeepCenteringWindow);
+                float centering = (1f - off) / (1f + off * BeepSharpness);
                 float interval = Mathf.Lerp(BeepSlowInterval, BeepFastInterval, centering);
                 float pitch = Mathf.Lerp(BeepPitchFar, BeepPitchNear, centering);
                 if (_beepTimer <= 0f)
