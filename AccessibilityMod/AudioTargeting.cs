@@ -271,6 +271,7 @@ namespace AccessibilityMod
             _awareEnemyId = 0;
             _spokeNoAmmo = false;
             _blockedFound = false;
+            Targeting.ForgetRigs();
         }
 
         /// <summary>

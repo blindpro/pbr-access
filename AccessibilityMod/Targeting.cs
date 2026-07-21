@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 using InfimaGames.LowPolyShooterPack;
 
@@ -21,9 +22,26 @@ namespace AccessibilityMod
     /// </summary>
     internal static class Targeting
     {
-        // Sampled up the body, most valuable first: head and chest are what is left
-        // exposed above cover, and a shot to any of them still connects.
-        private static readonly float[] BodyHeights = { 1.5f, 1.2f, 0.7f };
+        // Real skeleton joints, most valuable first: head and chest are what stays
+        // exposed above cover, and a shot to any of them connects.
+        //
+        // These are the animated bone transforms, not offsets from the character
+        // root. The game's own bots aim at GetBoneTransform(Head).position and hit
+        // reliably; a fixed height above the root only agrees with the body while
+        // the enemy is standing still on flat ground, and drifts into empty air the
+        // moment they crouch, go prone, stand on a slope or lean through an
+        // animation - which is exactly when a fight is happening.
+        private static readonly HumanBodyBones[] SampleBones =
+        {
+            HumanBodyBones.Head,
+            HumanBodyBones.UpperChest,
+            HumanBodyBones.Chest,
+            HumanBodyBones.Spine,
+            HumanBodyBones.Hips,
+        };
+
+        // Used only when a character has no humanoid rig to ask.
+        private static readonly float[] FallbackHeights = { 1.5f, 1.2f, 0.7f };
 
         // Skip the first stretch of the ray so the player's own body, arms and the
         // weapon in their hands can never be mistaken for cover.
@@ -35,8 +53,17 @@ namespace AccessibilityMod
 
         private static readonly RaycastHit[] _hits = new RaycastHit[64];
 
+        /// <summary>
+        /// The centre of mass to measure range and bearing from - the real chest
+        /// joint where there is one, so it follows the body rather than hovering
+        /// over it.
+        /// </summary>
         public static Vector3 ChestOf(CharacterMultiplayer character)
         {
+            var points = RigOf(character).Points;
+            if (points != null && points.Length > 1 && points[1] != null)
+                return points[1].position;
+
             return character.transform.position + Vector3.up * 1.2f;
         }
 
@@ -48,13 +75,30 @@ namespace AccessibilityMod
         public static bool HasLineOfSight(CharacterMultiplayer player, Vector3 origin,
             CharacterMultiplayer target, out Vector3 visiblePoint)
         {
-            foreach (float height in BodyHeights)
+            var points = RigOf(target).Points;
+
+            if (points != null && points.Length > 0)
             {
-                Vector3 point = target.transform.position + Vector3.up * height;
-                if (IsClearPath(player, origin, point))
+                foreach (var joint in points)
                 {
-                    visiblePoint = point;
-                    return true;
+                    if (joint == null) continue;
+                    if (IsClearPath(player, origin, joint.position))
+                    {
+                        visiblePoint = joint.position;
+                        return true;
+                    }
+                }
+            }
+            else
+            {
+                foreach (float height in FallbackHeights)
+                {
+                    Vector3 point = target.transform.position + Vector3.up * height;
+                    if (IsClearPath(player, origin, point))
+                    {
+                        visiblePoint = point;
+                        return true;
+                    }
                 }
             }
 
@@ -136,19 +180,78 @@ namespace AccessibilityMod
             return best;
         }
 
-        // Bones are fixed for the lifetime of a character, and the scan asks for them
-        // several times a second - look them up once per target instead.
-        private static CharacterMultiplayer _bonesOwner;
-        private static CharacterBone[] _bonesCache;
+        /// <summary>
+        /// The rig lookups for one character. Both the hit bones and the skeleton
+        /// joints are fixed for a character's lifetime, while targeting asks for
+        /// them many times a second, so they are resolved once each. Keyed per
+        /// character rather than held as a single slot, because the aim assist and
+        /// the audio scan interleave different targets and would thrash it.
+        /// </summary>
+        private class Rig
+        {
+            public CharacterBone[] Bones;
+            public Transform[] Points;
+
+            public bool IsStale
+            {
+                get { return Points != null && Points.Length > 0 && Points[0] == null; }
+            }
+        }
+
+        private static readonly Dictionary<int, Rig> _rigs = new Dictionary<int, Rig>();
+
+        /// <summary>Dropped between matches so rigs from the last one are not kept alive.</summary>
+        public static void ForgetRigs()
+        {
+            _rigs.Clear();
+        }
+
+        private static Rig RigOf(CharacterMultiplayer character)
+        {
+            int id = character.GetInstanceID();
+            // A destroyed character leaves its cached transforms reading as null, so
+            // a rig that has lost its joints is rebuilt rather than trusted.
+            if (_rigs.TryGetValue(id, out Rig cached) && !cached.IsStale) return cached;
+
+            var rig = new Rig { Bones = character.GetComponentsInChildren<CharacterBone>() };
+
+            var thirdPerson = character.GetComponent<ThirdPerson>();
+            var animator = thirdPerson != null ? thirdPerson.tps_animator : null;
+            if (animator != null && animator.isHuman)
+            {
+                var points = new List<Transform>(SampleBones.Length);
+                foreach (var bone in SampleBones)
+                {
+                    var joint = animator.GetBoneTransform(bone);
+                    if (joint != null) points.Add(joint);
+                }
+                rig.Points = points.ToArray();
+            }
+
+            _rigs[id] = rig;
+            return rig;
+        }
 
         private static CharacterBone[] BonesOf(CharacterMultiplayer target)
         {
-            if (target == null) return null;
-            if (target == _bonesOwner && _bonesCache != null) return _bonesCache;
+            return target == null ? null : RigOf(target).Bones;
+        }
 
-            _bonesOwner = target;
-            _bonesCache = target.GetComponentsInChildren<CharacterBone>();
-            return _bonesCache;
+        /// <summary>How many damageable bones this character exposes - zero means
+        /// nothing on them can be shot, which the lock could never explain by ear.</summary>
+        public static int BoneCount(CharacterMultiplayer target)
+        {
+            var bones = BonesOf(target);
+            return bones == null ? 0 : bones.Length;
+        }
+
+        /// <summary>How many real skeleton joints we found; zero means we are on the
+        /// fixed-height fallback and aiming at estimated positions.</summary>
+        public static int JointCount(CharacterMultiplayer target)
+        {
+            if (target == null) return 0;
+            var points = RigOf(target).Points;
+            return points == null ? 0 : points.Length;
         }
 
         /// <summary>
