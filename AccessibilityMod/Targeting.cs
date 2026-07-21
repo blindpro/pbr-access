@@ -97,6 +97,61 @@ namespace AccessibilityMod
         }
 
         /// <summary>
+        /// How far off the aim is from the target's actual silhouette, in degrees:
+        /// zero or less means the crosshair is somewhere on their body.
+        ///
+        /// This exists because the game's hit ray is infinitely thin and the bone
+        /// colliders are separate capsules with gaps between them - a ray-only lock
+        /// blinks out between the shoulder and the chest while the aim has not moved.
+        /// Measuring against the bones the game would damage keeps the lock honest
+        /// without making it a pixel hunt.
+        /// </summary>
+        public static float AimError(Vector3 origin, Vector3 dir, CharacterMultiplayer target)
+        {
+            var bones = BonesOf(target);
+            if (bones == null || bones.Length == 0) return float.MaxValue;
+
+            float best = float.MaxValue;
+
+            foreach (var bone in bones)
+            {
+                if (bone == null) continue;
+                var col = bone.GetComponent<Collider>();
+                if (col == null || !col.enabled) continue;
+
+                Bounds bounds = col.bounds;
+                Vector3 toBone = bounds.center - origin;
+                float dist = toBone.magnitude;
+                if (dist < 0.01f) continue;
+
+                // Largest half-extent: the bone's own size, not a tuned constant, so
+                // a distant enemy demands real precision and a close one does not.
+                float radius = Mathf.Max(bounds.extents.x, bounds.extents.y, bounds.extents.z);
+                float angularRadius = Mathf.Atan2(radius, dist) * Mathf.Rad2Deg;
+
+                float error = Vector3.Angle(dir, toBone) - angularRadius;
+                if (error < best) best = error;
+            }
+
+            return best;
+        }
+
+        // Bones are fixed for the lifetime of a character, and the scan asks for them
+        // several times a second - look them up once per target instead.
+        private static CharacterMultiplayer _bonesOwner;
+        private static CharacterBone[] _bonesCache;
+
+        private static CharacterBone[] BonesOf(CharacterMultiplayer target)
+        {
+            if (target == null) return null;
+            if (target == _bonesOwner && _bonesCache != null) return _bonesCache;
+
+            _bonesOwner = target;
+            _bonesCache = target.GetComponentsInChildren<CharacterBone>();
+            return _bonesCache;
+        }
+
+        /// <summary>
         /// The game's own hit test, run ahead of time. Damage happens if and only if
         /// the camera's exact forward ray reaches a CharacterBone on this target
         /// before it reaches anything else, so that is precisely what we ask.

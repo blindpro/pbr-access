@@ -10,9 +10,10 @@ namespace AccessibilityMod
     /// effective range (and has clear line of sight), this plays 3D positional
     /// "radar" beeps at the enemy's world position so the player can turn toward
     /// the sound and center it. The beeps speed up the closer the crosshair gets
-    /// to the enemy. Once the crosshair is inside the enemy's silhouette (i.e. a
-    /// shot would connect), the beeps stop and a steady solid LOCK tone plays,
-    /// telling the player they can fire and hit.
+    /// to the enemy. Once the crosshair is on the enemy's body, the beeps stop and
+    /// a steady solid LOCK tone plays: "you are aimed at them, shoot". It is a
+    /// sight picture, not a guaranteed kill - they can still move, the shot can
+    /// still clip a limb, and the fight is still the player's to win.
     ///
     /// It always targets the single most-centered eligible enemy so the audio
     /// stays readable even with several enemies around.
@@ -36,22 +37,22 @@ namespace AccessibilityMod
         // gate is min(this, current weapon range).
         private const float DetectionRadius = 80f;
 
-        // Angular size of a torso at the target's distance. This no longer decides
-        // the lock - only how wide the "almost there" band around it is.
-        private const float LockTargetHalfWidth = 1.2f;
-        private const float LockAngleMin = 5f;
-        private const float LockAngleMax = 18f;
+        // The lock means "the crosshair is on them, shoot" - not "they are already
+        // dead". It engages when the aim is inside the enemy's real silhouette, or
+        // when the game's own hit ray confirms a shot lands. Both are measured off
+        // the bones the game damages, so the tone stops promising hits that miss
+        // without turning into a pixel hunt nobody can win by ear.
+        private const float LockAcquireAngle = 0f;   // on the body
+        private const float LockKeepAngle = 1.2f;    // hysteresis: drifting just off holds it
 
-        // The solid tone now means one thing: fire and you hit. It is driven by the
-        // game's own hit ray, which is exact, so it is held briefly after the last
-        // confirmation - otherwise ordinary aim wobble chops it into stutter.
-        private const float LockHoldTime = 0.2f;
+        // Held briefly after the last confirmation, so ordinary aim wobble and the
+        // gaps between bone colliders do not chop the tone into stutter.
+        private const float LockHoldTime = 0.25f;
         private float _lockHold;
 
-        // Near-lock: the approach cue. Inside this multiple of the torso angle but
-        // not yet actually on target, a pulsing tone plays - "one nudge away" - so
-        // the last few degrees are audible instead of a silent gap.
-        private const float NearLockMultiplier = 2.5f;
+        // Near-lock: the approach cue, a pulsing tone from a couple of body widths
+        // out, so the last few degrees are audible instead of a silent gap.
+        private const float NearLockAngle = 4f;
 
         // Positional beep pacing: slower and lower when the enemy is off to the
         // side, faster and higher as the crosshair approaches center.
@@ -131,7 +132,6 @@ namespace AccessibilityMod
 
             CharacterMultiplayer best = null;
             float bestAngle = float.MaxValue;
-            float bestDist = 0f;
             Vector3 bestPos = Vector3.zero;
 
             // Nearest enemy we can see is behind cover (drives the dull pip).
@@ -169,7 +169,6 @@ namespace AccessibilityMod
                 {
                     bestAngle = angle;
                     best = other;
-                    bestDist = dist;
                     bestPos = visiblePos;
                 }
             }
@@ -196,16 +195,18 @@ namespace AccessibilityMod
                 _lockHold = 0f;
             }
 
-            // Angular size of the enemy at this distance - the near-lock band only.
-            float lockAngle = Mathf.Clamp(
-                Mathf.Atan2(LockTargetHalfWidth, bestDist) * Mathf.Rad2Deg,
-                LockAngleMin, LockAngleMax);
+            // How far the crosshair is from their body, measured against the same
+            // bones the game checks. Easier to keep than to acquire, so a lock does
+            // not drop the instant the aim breathes.
+            float aimError = Targeting.AimError(aimOrigin, aimDir, best);
+            bool onTarget = aimError <= (_locked ? LockKeepAngle : LockAcquireAngle);
 
-            // The lock is the game's own hit test and nothing else. An angular
-            // threshold, however carefully tuned, promises hits the game does not
-            // deliver: damage requires the camera ray to strike a bone collider, and
-            // at 20 m even five degrees of slack is nearly two meters of miss.
-            if (Targeting.IsShotLanding(player, aimOrigin, aimDir, maxRange, best))
+            // A confirmed hit always locks, whatever the silhouette maths says - the
+            // tone must never be missing when the shot genuinely connects.
+            if (!onTarget)
+                onTarget = Targeting.IsShotLanding(player, aimOrigin, aimDir, maxRange, best);
+
+            if (onTarget)
                 _lockHold = LockHoldTime;
             else
                 _lockHold -= ScanInterval;
@@ -214,7 +215,7 @@ namespace AccessibilityMod
 
             // Just outside the lock: pulse, so the player can hear the last few
             // degrees closing instead of hunting a silent window.
-            bool wantNearLock = !wantLock && bestAngle <= lockAngle * NearLockMultiplier;
+            bool wantNearLock = !wantLock && aimError <= NearLockAngle;
 
             // An empty gun cannot land a shot, so the lock tone would be a lie.
             // Say "reload" once instead and keep the tone silent.
