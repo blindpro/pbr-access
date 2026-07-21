@@ -39,6 +39,7 @@ namespace AccessibilityMod
                 _navigationAssistant.Tick();
                 _aimAssist.Tick();
                 _audioTargeting.Tick();
+                HitAnnouncer.Tick();
             }
             catch (Exception ex)
             {
