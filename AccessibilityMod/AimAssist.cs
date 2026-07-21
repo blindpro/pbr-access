@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
@@ -7,11 +8,21 @@ namespace AccessibilityMod
 {
     /// <summary>
     /// Provides aim assist for accessibility:
+    /// - Right Shift faces the nearest enemy outright, and presses after that walk
+    ///   through the others
     /// - Steers both the body (yaw) and the camera pivot (pitch) toward the
     ///   most-centered enemy that can actually be shot
     /// - Pulls hard while firing, and gently once the crosshair is already close,
     ///   so the last few degrees onto a target close themselves instead of having
     ///   to be found by ear
+    ///
+    /// Right Shift exists because the magnetism alone could not be reached. It only
+    /// engages inside a cone the player has to arrive in first, and arriving there
+    /// meant turning by ear to within a few degrees - while the arrow keys turn yaw
+    /// only, so any error in pitch was not closable by hand at all. In practice the
+    /// aim sat 45 to 60 degrees out with the enemy plainly audible and the assist
+    /// never running. A key that simply turns to face them costs one press and
+    /// hands a settled aim to the magnetism, which is what it was always for.
     ///
     /// Everything is measured on the shot ray itself - the fps camera's position
     /// and forward, which is the exact ray ThirdPerson.ComputeLookAtRaycast fires
@@ -49,6 +60,26 @@ namespace AccessibilityMod
         private const float TargetStickyMultiplier = 1.6f;
         private const float TargetStickyBias = 0.5f;
 
+        // Face-the-enemy key. Right Shift because the turning arrows are already
+        // under that hand and Left Control is held down to fire, so it can be
+        // pressed mid-burst without fighting either.
+        private const KeyCode SnapKey = KeyCode.RightShift;
+
+        // The turn is deliberate, so it reaches all the way behind the player.
+        private const float SnapConeAngle = 180f;
+        // Fast enough to feel like an answer to the keypress rather than a walk,
+        // slow enough that the sweep is still audible as a turn.
+        private const float SnapTurnSpeed = 540f;
+        // Handed over to the magnetism here rather than driven all the way in: the
+        // sticky cone is 20 degrees, so it takes over comfortably from this.
+        private const float SnapHandoffAngle = 1.5f;
+
+        // Held across frames while the turn plays out, and remembered afterwards so
+        // the next press moves on to the next enemy instead of re-facing this one.
+        private CharacterMultiplayer _snapTarget;
+        private CharacterMultiplayer _lastSnapped;
+        private readonly List<CharacterMultiplayer> _snapCandidates = new List<CharacterMultiplayer>();
+
         private static readonly FieldInfo _holdingButtonFire =
             AccessTools.Field(typeof(Character), "holdingButtonFire");
         private static readonly FieldInfo _rotationCharacter =
@@ -66,17 +97,18 @@ namespace AccessibilityMod
         public void Tick()
         {
             var player = CharacterMultiplayer.GetMainPlayer();
-            if (player == null || player.IsDead()) { _target = null; return; }
+            if (player == null || player.IsDead()) { Forget(); return; }
 
-            if (MatchmakingManager.Instance == null) { _target = null; return; }
+            if (MatchmakingManager.Instance == null) { Forget(); return; }
             if (MatchmakingManager.Instance.GetRoomStatus() != MatchmakingManager.RoomStatus.Playing)
             {
-                _target = null;
+                Forget();
                 return;
             }
 
+            // Nothing can be shot from the plane, so nothing is aimed from it either.
             var parachute = player.GetComponent<CharacterParachute>();
-            if (parachute != null && parachute.isParachuting) { _target = null; return; }
+            if (parachute != null && parachute.isParachuting) { Forget(); return; }
 
             var character = player.GetComponent<Character>();
             if (character == null) return;
@@ -88,6 +120,15 @@ namespace AccessibilityMod
             bool isFiring = (bool)_holdingButtonFire.GetValue(character);
 
             GetAim(player, cameraLook, out Vector3 origin, out Vector3 aimDir);
+
+            // The loot list owns the keyboard while it is up.
+            if (Input.GetKeyDown(SnapKey) && !LootMenu.IsOpen)
+                BeginSnap(player, origin, aimDir);
+
+            // A turn in progress outranks the magnetism, which would otherwise pull
+            // back toward whatever is still nearest the crosshair on the way past.
+            if (_snapTarget != null && StepSnap(player, cameraLook, origin, aimDir))
+                return;
 
             float cone = isFiring ? FireConeAngle : StickyConeAngle;
             _target = FindTarget(player, origin, aimDir, cone);
@@ -105,6 +146,102 @@ namespace AccessibilityMod
             }
 
             Steer(player, cameraLook, origin, aimDir, speed * Time.deltaTime);
+        }
+
+        /// <summary>Drops everything: dead, between matches, or back in the plane.</summary>
+        private void Forget()
+        {
+            _target = null;
+            _snapTarget = null;
+            _lastSnapped = null;
+        }
+
+        /// <summary>
+        /// Picks who to face and starts the turn. Enemies are ordered by how far
+        /// off the aim already is, so the first press takes the most centered one -
+        /// which, right after a beep, is the one being listened to.
+        ///
+        /// A second press moves on. The turn leaves the previous enemy sitting at
+        /// the crosshair, so "nearest the aim" would just choose them again; the
+        /// one already faced is therefore skipped rather than re-picked, and the
+        /// list wraps so pressing repeatedly walks the whole room and comes back.
+        /// </summary>
+        private void BeginSnap(CharacterMultiplayer player, Vector3 origin, Vector3 aimDir)
+        {
+            _snapCandidates.Clear();
+
+            foreach (var other in CharacterMultiplayer.characters)
+            {
+                if (!AudioTargeting.IsHostile(player, other)) continue;
+
+                float dist = Vector3.Distance(Targeting.ChestOf(other), origin);
+                if (dist < 0.5f || dist > AssistMaxRange) continue;
+
+                // Turning to face a wall helps nobody - only enemies with a shot on
+                // them are worth spending a press on.
+                if (!Targeting.HasLineOfSight(player, origin, other, out Vector3 visible)) continue;
+                if (Vector3.Angle(aimDir, visible - origin) > SnapConeAngle) continue;
+
+                _snapCandidates.Add(other);
+            }
+
+            if (_snapCandidates.Count == 0)
+            {
+                _snapTarget = null;
+                _lastSnapped = null;
+                ScreenReaderManager.Speak("No enemy in the open", true);
+                return;
+            }
+
+            _snapCandidates.Sort((a, b) =>
+                AngleTo(origin, aimDir, a).CompareTo(AngleTo(origin, aimDir, b)));
+
+            int index = 0;
+            if (_lastSnapped != null && _snapCandidates[0] == _lastSnapped && _snapCandidates.Count > 1)
+                index = 1;
+
+            _snapTarget = _snapCandidates[index];
+            _lastSnapped = _snapTarget;
+
+            float range = Vector3.Distance(Targeting.ChestOf(_snapTarget), origin);
+            ScreenReaderManager.Speak($"Facing enemy, {Mathf.RoundToInt(range)} meters", true);
+        }
+
+        /// <summary>
+        /// Drives one frame of the turn. Returns true while it is still turning, so
+        /// the caller leaves the magnetism alone until the aim has arrived.
+        /// </summary>
+        private bool StepSnap(CharacterMultiplayer player, CameraLook cameraLook, Vector3 origin,
+            Vector3 aimDir)
+        {
+            // They can die, leave, or duck into cover mid-turn.
+            if (!AudioTargeting.IsHostile(player, _snapTarget))
+            {
+                _snapTarget = null;
+                return false;
+            }
+
+            // Re-read every frame: the target is moving, and so is the part of them
+            // that is exposed.
+            if (!Targeting.HasLineOfSight(player, origin, _snapTarget, out Vector3 visible))
+                visible = Targeting.ChestOf(_snapTarget);
+
+            _aimPoint = visible;
+            _target = _snapTarget;
+
+            if (Vector3.Angle(aimDir, visible - origin) <= SnapHandoffAngle)
+            {
+                _snapTarget = null;
+                return false; // arrived - let the magnetism hold it from here
+            }
+
+            Steer(player, cameraLook, origin, aimDir, SnapTurnSpeed * Time.deltaTime);
+            return true;
+        }
+
+        private static float AngleTo(Vector3 origin, Vector3 aimDir, CharacterMultiplayer target)
+        {
+            return Vector3.Angle(aimDir, Targeting.ChestOf(target) - origin);
         }
 
         /// <summary>

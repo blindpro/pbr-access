@@ -28,6 +28,16 @@ namespace AccessibilityMod
                 return;
             }
 
+            // Targeting is switched off for the whole plane ride, so reporting a
+            // range and an angle here reads as a fault when it is the intended
+            // behaviour - there is no shot to take from the plane.
+            var parachute = player.GetComponent<CharacterParachute>();
+            if (parachute != null && parachute.isParachuting)
+            {
+                ScreenReaderManager.Speak("Lock check, targeting off until you land", true);
+                return;
+            }
+
             GetAim(player, out Vector3 origin, out Vector3 dir);
 
             // The most-centered hostile, whether or not anything else would accept
