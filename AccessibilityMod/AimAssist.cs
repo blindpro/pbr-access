@@ -32,8 +32,10 @@ namespace AccessibilityMod
         private const float FireTurnSpeed = 120f;
         private const float StickyTurnSpeed = 35f;
 
-        // Below this the aim is already on target - stop, or it jitters.
-        private const float SettleAngle = 0.4f;
+        // Below this the aim is already on target - stop, or it jitters. It has to
+        // be tiny: the game only damages what its single camera ray strikes, and at
+        // 60 m even half a degree of leftover error is half a meter of miss.
+        private const float SettleAngle = 0.03f;
 
         // The enemy already being tracked keeps the assist through a wider cone
         // and wins ties, so the aim does not flick between two nearby enemies.
@@ -48,6 +50,11 @@ namespace AccessibilityMod
             AccessTools.Field(typeof(CameraLook), "rotationCamera");
 
         private CharacterMultiplayer _target;
+
+        // The exposed point on the target that the assist steers at. Aiming at a
+        // fixed chest height drove the crosshair into whatever the enemy was
+        // crouched behind; this is whichever part we can actually see.
+        private Vector3 _aimPoint;
 
         public void Tick()
         {
@@ -96,24 +103,23 @@ namespace AccessibilityMod
             {
                 if (!AudioTargeting.IsHostile(player, other)) continue;
 
-                Vector3 toTarget = ChestOf(other) - origin;
-                float dist = toTarget.magnitude;
+                float dist = Vector3.Distance(Targeting.ChestOf(other), origin);
                 if (dist < 0.5f || dist > AssistMaxRange) continue;
 
-                bool tracked = other == _target;
-                float angle = Vector3.Angle(aimDir, toTarget);
-                if (angle > (tracked ? cone * TargetStickyMultiplier : cone)) continue;
-
                 // Behind a wall means no shot, so there is nothing to assist.
-                if (Physics.Raycast(origin, toTarget / dist, dist - 0.5f,
-                    AudioTargeting.GetObstacleMask(), QueryTriggerInteraction.Ignore))
+                if (!Targeting.HasLineOfSight(player, origin, other, out Vector3 visible))
                     continue;
+
+                bool tracked = other == _target;
+                float angle = Vector3.Angle(aimDir, visible - origin);
+                if (angle > (tracked ? cone * TargetStickyMultiplier : cone)) continue;
 
                 float score = tracked ? angle * TargetStickyBias : angle;
                 if (score < bestScore)
                 {
                     bestScore = score;
                     best = other;
+                    _aimPoint = visible;
                 }
             }
 
@@ -129,7 +135,7 @@ namespace AccessibilityMod
         private void Steer(CharacterMultiplayer player, CameraLook cameraLook, Vector3 origin,
             CharacterMultiplayer target, float maxStep)
         {
-            Vector3 toTarget = ChestOf(target) - origin;
+            Vector3 toTarget = _aimPoint - origin;
 
             // Yaw: turn the body, exactly as arrow-key turning does.
             Vector3 flatTo = new Vector3(toTarget.x, 0f, toTarget.z);
@@ -167,12 +173,6 @@ namespace AccessibilityMod
                     _rotationCamera.SetValue(cameraLook, rot * look);
                 }
             }
-        }
-
-        /// <summary>Torso height - the same aim point the audio lock tone uses.</summary>
-        private static Vector3 ChestOf(CharacterMultiplayer character)
-        {
-            return character.transform.position + Vector3.up * 1.2f;
         }
 
         private static void GetAim(CharacterMultiplayer player, CameraLook cameraLook,

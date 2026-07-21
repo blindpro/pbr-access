@@ -36,25 +36,21 @@ namespace AccessibilityMod
         // gate is min(this, current weapon range).
         private const float DetectionRadius = 80f;
 
-        // "Can I hit it" test: the crosshair must fall within the enemy silhouette.
-        // Half-width in meters, converted to an angular threshold at the target's
-        // distance and clamped so it is neither impossibly tight nor too loose.
-        // Deliberately generous - aim assist nudges the rest of the way once you
-        // fire, so a tight geometric threshold made the lock nearly unreachable.
+        // Angular size of a torso at the target's distance. This no longer decides
+        // the lock - only how wide the "almost there" band around it is.
         private const float LockTargetHalfWidth = 1.2f;
         private const float LockAngleMin = 5f;
         private const float LockAngleMax = 18f;
-        private const float LockExitMultiplier = 1.5f; // hysteresis so lock doesn't flicker
 
-        // Forgiveness radius for the "would this shot land" sweep, in meters. A
-        // plain ray only locks on a pixel-perfect line, which at 20 m is a three
-        // degree window - unfindable by ear. Sweeping a sphere of roughly torso
-        // width means the lock engages when the shot lands or very nearly does.
-        private const float LockSweepRadius = 0.5f;
+        // The solid tone now means one thing: fire and you hit. It is driven by the
+        // game's own hit ray, which is exact, so it is held briefly after the last
+        // confirmation - otherwise ordinary aim wobble chops it into stutter.
+        private const float LockHoldTime = 0.2f;
+        private float _lockHold;
 
-        // Near-lock: the missing final approach cue. Between the lock threshold and
-        // this multiple of it, a pulsing tone plays - "one nudge away" - so the last
-        // few degrees are audible instead of a silent gap before the solid tone.
+        // Near-lock: the approach cue. Inside this multiple of the torso angle but
+        // not yet actually on target, a pulsing tone plays - "one nudge away" - so
+        // the last few degrees are audible instead of a silent gap.
         private const float NearLockMultiplier = 2.5f;
 
         // Positional beep pacing: slower and lower when the enemy is off to the
@@ -146,17 +142,16 @@ namespace AccessibilityMod
             {
                 if (!IsHostile(player, other)) continue;
 
-                Vector3 targetPos = other.transform.position + Vector3.up * 1.2f;
-                Vector3 toTarget = targetPos - aimOrigin;
-                float dist = toTarget.magnitude;
+                Vector3 targetPos = Targeting.ChestOf(other);
+                float dist = Vector3.Distance(aimOrigin, targetPos);
                 if (dist < 0.5f) continue;
                 if (dist > maxRange && dist > BlockedBeepRange) continue;
 
                 // Must have clear line of sight - if a wall blocks it, we can't hit
                 // them, but they still get a behind-cover pip so the player can hear
-                // which way the threat is.
-                if (Physics.Raycast(aimOrigin, toTarget.normalized, dist - 0.5f,
-                    GetObstacleMask(), QueryTriggerInteraction.Ignore))
+                // which way the threat is. Any exposed part of the body counts, and
+                // the beeps then track that part rather than a chest behind a wall.
+                if (!Targeting.HasLineOfSight(player, aimOrigin, other, out Vector3 visiblePos))
                 {
                     if (dist <= BlockedBeepRange && dist < blockedDist)
                     {
@@ -169,13 +164,13 @@ namespace AccessibilityMod
 
                 if (dist > maxRange) continue; // visible, but out of weapon range
 
-                float angle = Vector3.Angle(aimDir, toTarget);
+                float angle = Vector3.Angle(aimDir, visiblePos - aimOrigin);
                 if (angle < bestAngle)
                 {
                     bestAngle = angle;
                     best = other;
                     bestDist = dist;
-                    bestPos = targetPos;
+                    bestPos = visiblePos;
                 }
             }
 
@@ -198,21 +193,24 @@ namespace AccessibilityMod
             {
                 _currentTarget = best;
                 _locked = false;
+                _lockHold = 0f;
             }
 
-            // Angular size of the enemy at this distance = when a shot would land.
+            // Angular size of the enemy at this distance - the near-lock band only.
             float lockAngle = Mathf.Clamp(
                 Mathf.Atan2(LockTargetHalfWidth, bestDist) * Mathf.Rad2Deg,
                 LockAngleMin, LockAngleMax);
 
-            // Hysteresis: easier to keep the lock than to acquire it. A sweep that
-            // actually strikes the enemy always locks, however wide the angle is -
-            // the tone must never be missing when the shot genuinely connects.
-            bool wantLock = _locked
-                ? bestAngle <= lockAngle * LockExitMultiplier
-                : bestAngle <= lockAngle;
-            if (!wantLock)
-                wantLock = IsShotOnTarget(player, aimOrigin, aimDir, maxRange, best);
+            // The lock is the game's own hit test and nothing else. An angular
+            // threshold, however carefully tuned, promises hits the game does not
+            // deliver: damage requires the camera ray to strike a bone collider, and
+            // at 20 m even five degrees of slack is nearly two meters of miss.
+            if (Targeting.IsShotLanding(player, aimOrigin, aimDir, maxRange, best))
+                _lockHold = LockHoldTime;
+            else
+                _lockHold -= ScanInterval;
+
+            bool wantLock = _lockHold > 0f;
 
             // Just outside the lock: pulse, so the player can hear the last few
             // degrees closing instead of hunting a silent window.
@@ -284,6 +282,7 @@ namespace AccessibilityMod
             StopLock();
             StopNearLock();
             _currentTarget = null;
+            _lockHold = 0f;
         }
 
         /// <summary>
@@ -297,42 +296,6 @@ namespace AccessibilityMod
             if (other.IsDead()) return false;
             if (player.IsSquadMember(other)) return false;
             return true;
-        }
-
-        /// <summary>
-        /// True when a shot fired straight down the aim direction would strike this
-        /// enemy before anything solid - the most honest "you can fire now" test.
-        /// </summary>
-        private static bool IsShotOnTarget(CharacterMultiplayer player, Vector3 origin,
-            Vector3 dir, float range, CharacterMultiplayer target)
-        {
-            // Start just ahead of the camera so the player's own body, arms and
-            // weapon model are never mistaken for cover.
-            Vector3 start = origin + dir * 0.5f;
-            RaycastHit[] hits = Physics.SphereCastAll(start, LockSweepRadius, dir, range,
-                ~0, QueryTriggerInteraction.Ignore);
-            if (hits.Length == 0) return false;
-
-            System.Array.Sort(hits, (a, b) => a.distance.CompareTo(b.distance));
-
-            foreach (var hit in hits)
-            {
-                var character = hit.collider.GetComponentInParent<CharacterMultiplayer>();
-
-                // Anything hanging off our own rig sits in front of every shot we
-                // take - held weapons included, which have no character component.
-                if (character == player) continue;
-                if (hit.collider.transform.IsChildOf(player.transform)) continue;
-                // First character the sweep touches decides it: the target means the
-                // shot lands, anyone else means they are in the way.
-                if (character != null) return character == target;
-
-                // Geometry is deliberately ignored here. The sweep has width, so it
-                // clips walls merely *beside* a clear shot; the precise line of sight
-                // ray in the scan loop has already ruled out real cover.
-            }
-
-            return false;
         }
 
         /// <summary>False only when we can positively confirm the gun is empty.</summary>
@@ -367,7 +330,7 @@ namespace AccessibilityMod
             {
                 if (!IsHostile(player, other)) continue;
 
-                Vector3 pos = other.transform.position + Vector3.up * 1.2f;
+                Vector3 pos = Targeting.ChestOf(other);
                 float dist = Vector3.Distance(aimOrigin, pos);
                 if (dist > AwarenessRadius) continue;
 
@@ -386,8 +349,9 @@ namespace AccessibilityMod
                 return;
             }
 
-            bool behindCover = Physics.Raycast(aimOrigin, (nearestPos - aimOrigin).normalized,
-                nearestDist - 0.5f, GetObstacleMask(), QueryTriggerInteraction.Ignore);
+            // Same exposure test the targeting scan uses, so "behind cover" and the
+            // absence of targeting beeps can never disagree.
+            bool behindCover = !Targeting.HasLineOfSight(player, aimOrigin, nearest, out Vector3 _);
 
             string direction = RelativeDirection(player.transform, nearestPos);
             string elevation = Elevation(player.transform.position.y, nearestPos.y);
