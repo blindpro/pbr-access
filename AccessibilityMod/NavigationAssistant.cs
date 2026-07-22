@@ -10,7 +10,7 @@ namespace AccessibilityMod
     /// - Doorway/opening detection to the left and right
     /// - Nearby loot announcements with item names
     /// - A distinct proximity beep for ammo that fits the player's current weapon
-    /// - Wide long-range building scan with direction/distance callouts
+    /// - Wide long-range building scan with name/direction/distance callouts
     /// - Pickup confirmation announcements
     /// - Indoor/outdoor transition detection
     /// </summary>
@@ -476,6 +476,7 @@ namespace AccessibilityMod
 
             float bestDist = float.MaxValue;
             float bestAngle = 0f;
+            Transform bestHit = null;
             bool found = false;
 
             // Sweep a wide fan relative to where the player faces.
@@ -494,6 +495,7 @@ namespace AccessibilityMod
                 {
                     bestDist = hit.distance;
                     bestAngle = angle;
+                    bestHit = hit.transform;
                     found = true;
                 }
             }
@@ -509,8 +511,12 @@ namespace AccessibilityMod
                 + (Quaternion.Euler(0, bestAngle, 0) * player.transform.forward) * bestDist;
             string direction = GetRelativeDirection(player.transform, target);
 
+            // Name it if the prefab is one we know, so this says "church" where it used
+            // to say "building".
+            string what = Landmarks.NameOr(bestHit, "building");
+
             int bucket = Mathf.RoundToInt(bestDist / BuildingDistBucket) * (int)BuildingDistBucket;
-            string key = direction + bucket;
+            string key = what + direction + bucket;
 
             // Don't repeat the same callout until the cooldown elapses.
             if (key == _lastBuildingAnnounce && _buildingReannounceTimer > 0f) return;
@@ -518,9 +524,9 @@ namespace AccessibilityMod
             _lastBuildingAnnounce = key;
             _buildingReannounceTimer = BuildingReannounceInterval;
 
-            string prefix = bucket >= 40 ? "Building in the distance" : "Building";
+            string prefix = bucket >= 40 ? $"{what} in the distance" : what;
             // interrupt: false so near-wall safety callouts always take priority.
-            ScreenReaderManager.Speak($"{prefix}, {bucket} meters {direction}", false);
+            ScreenReaderManager.Speak($"{Capitalize(prefix)}, {bucket} meters {direction}", false);
         }
 
         /// <summary>
@@ -713,6 +719,7 @@ namespace AccessibilityMod
 
             var angles = new List<float>();
             var distances = new List<float>();
+            var hits = new List<Transform>();
 
             for (float angle = -180f; angle < 180f; angle += SurveySweepStep)
             {
@@ -725,6 +732,7 @@ namespace AccessibilityMod
 
                 angles.Add(angle);
                 distances.Add(hit.distance);
+                hits.Add(hit.transform);
             }
 
             var found = new List<string>();
@@ -736,7 +744,8 @@ namespace AccessibilityMod
                 if (nearest < 0) break;
 
                 float bearing = angles[nearest];
-                found.Add($"building {DirectionFromAngle(bearing)} {Mathf.RoundToInt(distances[nearest])} meters");
+                string what = Landmarks.NameOr(hits[nearest], "building");
+                found.Add($"{what} {DirectionFromAngle(bearing)} {Mathf.RoundToInt(distances[nearest])} meters");
 
                 // Drop every ray that plausibly belongs to the same structure.
                 for (int i = angles.Count - 1; i >= 0; i--)
@@ -744,6 +753,7 @@ namespace AccessibilityMod
                     if (Mathf.Abs(Mathf.DeltaAngle(angles[i], bearing)) > SurveyMergeArc) continue;
                     angles.RemoveAt(i);
                     distances.RemoveAt(i);
+                    hits.RemoveAt(i);
                 }
             }
 
@@ -762,6 +772,13 @@ namespace AccessibilityMod
 
             float angle = Vector3.SignedAngle(playerTransform.forward, toTarget, Vector3.up);
             return DirectionFromAngle(angle);
+        }
+
+        /// <summary>First letter up, for a landmark name that has to start a sentence.</summary>
+        private static string Capitalize(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return text;
+            return char.ToUpper(text[0]) + text.Substring(1);
         }
 
         /// <summary>Shared 8-way vocabulary, for a bearing relative to player forward.</summary>

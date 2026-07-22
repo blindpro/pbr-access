@@ -191,12 +191,12 @@ Two usable facts for drop advice:
 3. **Flight-path announcement at match start.** Read `airplaneRotation.eulerAngles.y`,
    `Airplane.transform.position/forward`, `targetPos`, `speed`. One sentence, tells the
    player which half of the map they are being offered.
-4. ~~**Grid coordinates everywhere.**~~ Done — `MapGrid`, on the M key and auto-announced
+4. ~~**Grid coordinates everywhere.**~~ Done — `MapGrid`, on the P key and auto-announced
    on crossing a square. Extents come from `GameManager.bigMapCamera`, which turned out
    to be a better source than `Minimap` (see Not verified).
-5. ~~**Landmark naming from prefab names.**~~ Done for the grid readout (`MapGrid.Landmarks`).
-   Still worth feeding into the `B`-key survey in `NavigationAssistant`, which says
-   "building ahead" where it could say "church ahead".
+5. ~~**Landmark naming from prefab names.**~~ Done — `Landmarks`, shared by the grid
+   readout and by both building callouts in `NavigationAssistant`, so the `B` survey and
+   the passive distance scan say "church ahead" rather than "building ahead".
 
 ## Runtime handles worth remembering
 

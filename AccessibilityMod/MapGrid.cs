@@ -5,7 +5,8 @@ namespace AccessibilityMod
 {
     /// <summary>
     /// Gives the map spoken coordinates so it can be learned and talked about.
-    /// - M key: current cell and the nearest landmark
+    /// - P key: current cell and the nearest landmark (P for position; M opens the
+    ///   game's own pause menu)
     /// - Auto-announces the cell as you cross into it
     ///
     /// The map has no authored place names (no NewLocationTrigger survives in the
@@ -27,10 +28,6 @@ namespace AccessibilityMod
         // How far inside a new cell you must be before it is announced. Without this,
         // walking a boundary ping-pongs between two names.
         private const float CellEntryMargin = 12f;
-
-        // Landmarks are only worth naming while they are the thing you'd walk to.
-        private const float LandmarkSearchRadius = 80f;
-        private const float LandmarkNearbyDistance = 40f;
 
         private const float OnDemandCooldown = 1f;
         private float _onDemandCooldownTimer;
@@ -84,7 +81,7 @@ namespace AccessibilityMod
         {
             _onDemandCooldownTimer -= Time.deltaTime;
 
-            if (!Input.GetKeyDown(KeyCode.M)) return;
+            if (!Input.GetKeyDown(KeyCode.P)) return;
             if (_onDemandCooldownTimer > 0f) return;
 
             _onDemandCooldownTimer = OnDemandCooldown;
@@ -98,7 +95,7 @@ namespace AccessibilityMod
 
             string report = cell;
 
-            string landmark = DescribeNearestLandmark(focus, withDistance: true);
+            string landmark = Landmarks.DescribeNearest(focus, withDistance: true);
             if (landmark != null)
                 report += ". " + landmark;
 
@@ -117,7 +114,7 @@ namespace AccessibilityMod
 
             _announcedCell = cell;
 
-            string landmark = DescribeNearestLandmark(focus, withDistance: false);
+            string landmark = Landmarks.DescribeNearest(focus, withDistance: false);
             string report = landmark == null ? cell : $"{cell}, {landmark}";
 
             // interrupt: false so close-range wall and enemy callouts win.
@@ -200,185 +197,6 @@ namespace AccessibilityMod
             }
 
             return false;
-        }
-
-        // ----------------------------------------------------------- landmarks
-
-        /// <summary>
-        /// Names the most distinctive building standing near a point, e.g. "church" or
-        /// "radio tower". Nothing in the scene is labelled, so this reads the Synty
-        /// prefab names off the colliders around you.
-        /// </summary>
-        private static string DescribeNearestLandmark(Vector3 worldPos, bool withDistance)
-        {
-            // From the plane or under an open parachute we are hundreds of metres up,
-            // where a sphere of this size touches nothing. Ask at ground level instead,
-            // so the answer is about the place below us rather than the empty air.
-            worldPos = DropToGround(worldPos);
-
-            var hits = Physics.OverlapSphere(worldPos, LandmarkSearchRadius, GetLandmarkMask(),
-                QueryTriggerInteraction.Ignore);
-
-            string bestName = null;
-            int bestRank = int.MaxValue;
-            float bestDistance = float.MaxValue;
-            Vector3 bestPos = Vector3.zero;
-
-            for (int i = 0; i < hits.Length; i++)
-            {
-                var hit = hits[i];
-                if (hit == null) continue;
-
-                if (!TryNameLandmark(hit.transform, out string name, out int rank)) continue;
-
-                float distance = Vector3.Distance(worldPos, hit.transform.position);
-
-                // A landmark that says more wins outright; ties go to the closer one.
-                if (rank > bestRank) continue;
-                if (rank == bestRank && distance >= bestDistance) continue;
-
-                bestName = name;
-                bestRank = rank;
-                bestDistance = distance;
-                bestPos = hit.transform.position;
-            }
-
-            if (bestName == null) return null;
-
-            if (!withDistance)
-                return bestDistance <= LandmarkNearbyDistance ? bestName : null;
-
-            int metres = Mathf.RoundToInt(bestDistance);
-            string cardinal = GetCardinalTo(worldPos, bestPos);
-            return $"{bestName} {metres} meters {cardinal}";
-        }
-
-        /// <summary>
-        /// Walks a collider and its parents looking for a known building prefab. Names
-        /// like SM_Bld_Church_01_Glass mean the collider itself is often a window or a
-        /// door, so the useful name can be a level or two up.
-        /// </summary>
-        private static bool TryNameLandmark(Transform transform, out string name, out int rank)
-        {
-            name = null;
-            rank = int.MaxValue;
-
-            Transform current = transform;
-            for (int depth = 0; depth < 3 && current != null; depth++)
-            {
-                string objectName = current.name;
-                for (int i = 0; i < Landmarks.Length; i++)
-                {
-                    if (objectName.IndexOf(Landmarks[i].Token, System.StringComparison.OrdinalIgnoreCase) < 0)
-                        continue;
-
-                    // Landmarks is ordered most distinctive first, so the first hit at
-                    // this depth is the best name this object can give.
-                    name = Landmarks[i].Spoken;
-                    rank = i;
-                    return true;
-                }
-
-                current = current.parent;
-            }
-
-            return false;
-        }
-
-        private struct Landmark
-        {
-            public readonly string Token;
-            public readonly string Spoken;
-
-            public Landmark(string token, string spoken)
-            {
-                Token = token;
-                Spoken = spoken;
-            }
-        }
-
-        /// <summary>
-        /// Ordered most distinctive first: a church is worth calling from across a
-        /// square, a house is only worth mentioning when nothing better is standing
-        /// there. Tokens are the Synty prefab names found in the scene.
-        /// </summary>
-        private static readonly Landmark[] Landmarks =
-        {
-            new Landmark("Lighthouse", "lighthouse"),
-            new Landmark("Church", "church"),
-            new Landmark("RadioTower", "radio tower"),
-            new Landmark("Cooling_Tower", "cooling tower"),
-            new Landmark("SmokeStack", "smokestack"),
-            new Landmark("WaterTower", "water tower"),
-            new Landmark("Crane", "crane"),
-            new Landmark("HeliPad", "helipad"),
-            new Landmark("Bunker_Entrance", "bunker"),
-            new Landmark("ContainerBridge", "container bridge"),
-            new Landmark("Diner", "diner"),
-            new Landmark("Motel", "motel"),
-            new Landmark("Cafe", "cafe"),
-            new Landmark("AutoRepair", "auto repair shop"),
-            new Landmark("Pool", "swimming pool"),
-            new Landmark("Quarantine", "quarantine tent"),
-            new Landmark("Military_Tent", "military tent"),
-            new Landmark("WaterTank", "water tank"),
-            new Landmark("Market_Large", "big market"),
-            new Landmark("Market", "market"),
-            new Landmark("Warehouse", "warehouse"),
-            new Landmark("HighRise", "high rise"),
-            new Landmark("Industrial", "industrial building"),
-            new Landmark("Commercial", "commercial building"),
-            new Landmark("Shop", "shop"),
-            new Landmark("Apartment", "apartment block"),
-            new Landmark("House_Burnt", "burnt house"),
-            new Landmark("Junk_Shelter", "shack"),
-            new Landmark("Trailer", "trailer"),
-            new Landmark("House", "house"),
-        };
-
-        /// <summary>
-        /// Straight down to whatever is underneath, so a query made from the air is
-        /// about the ground it would land on. Stays put if there's nothing below.
-        /// </summary>
-        private static Vector3 DropToGround(Vector3 worldPos)
-        {
-            const float maxDrop = 2000f;
-
-            if (Physics.Raycast(worldPos, Vector3.down, out RaycastHit hit, maxDrop,
-                    GetLandmarkMask(), QueryTriggerInteraction.Ignore))
-                return hit.point + Vector3.up;
-
-            return worldPos;
-        }
-
-        private static int GetLandmarkMask()
-        {
-            int mask = 1 << 0; // Default: where the Synty buildings sit
-            int building = LayerMask.NameToLayer("Building");
-            if (building >= 0) mask |= 1 << building;
-            int env = LayerMask.NameToLayer("Environment");
-            if (env >= 0) mask |= 1 << env;
-            return mask;
-        }
-
-        /// <summary>World compass bearing, matching the F key's reading of north.</summary>
-        private static string GetCardinalTo(Vector3 from, Vector3 to)
-        {
-            Vector3 delta = to - from;
-            delta.y = 0f;
-            if (delta.sqrMagnitude < 0.01f) return "here";
-
-            float yaw = Mathf.Atan2(delta.x, delta.z) * Mathf.Rad2Deg;
-            yaw = ((yaw % 360f) + 360f) % 360f;
-
-            if (yaw >= 337.5f || yaw < 22.5f) return "north";
-            if (yaw < 67.5f) return "north east";
-            if (yaw < 112.5f) return "east";
-            if (yaw < 157.5f) return "south east";
-            if (yaw < 202.5f) return "south";
-            if (yaw < 247.5f) return "south west";
-            if (yaw < 292.5f) return "west";
-            return "north west";
         }
     }
 }
