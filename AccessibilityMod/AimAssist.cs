@@ -236,13 +236,22 @@ namespace AccessibilityMod
         /// holds while the player turns underneath it - which is the whole point,
         /// since they are turning and cannot tilt. The game clamps the pivot to its
         /// own limits next frame.
+        ///
+        /// The error is where we want to be minus where we are, in that order. It
+        /// was written the other way round, which drove the camera away from the
+        /// target by exactly the angle it should have closed: an enemy above got
+        /// aimed at further below, and the pivot only stopped when it had pushed
+        /// them out of the assist cone entirely. Since the arrow keys are yaw only,
+        /// nothing the player could press undid it, so the crosshair could sit dead
+        /// on an enemy's bearing and never once find their body. The lock tone was
+        /// telling the truth the whole time.
         /// </summary>
         private void SteerPitch(CameraLook cameraLook, Vector3 aimDir, Vector3 toTarget,
             float maxStep)
         {
             if (toTarget.sqrMagnitude < 0.0001f || aimDir.sqrMagnitude < 0.0001f) return;
 
-            float pitchError = Elevation(aimDir) - Elevation(toTarget);
+            float pitchError = Elevation(toTarget) - Elevation(aimDir);
             if (Mathf.Abs(pitchError) <= SettleAngle) return;
 
             Quaternion look = Quaternion.Euler(Mathf.Clamp(pitchError, -maxStep, maxStep), 0f, 0f);
