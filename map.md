@@ -206,9 +206,10 @@ Two usable facts for drop advice:
    building it is speaking about: "entered the church", "left the church". The ceiling ray
    was already there; what it lacked was a name and a second reading to confirm the change
    before speaking it.
-7. ~~**Getting through the door.**~~ Done — `EntryGuide`, on the Q key. Finding a building
-   was solved; entering one was not, and a doorway is a metre-wide gap that the callouts
-   step straight past.
+7. ~~**Getting through the door.**~~ Done — `DoorGuide`, on the Q key, both ways through.
+   Finding a building was solved; entering one was not, and a doorway is a metre-wide gap
+   that the callouts step straight past. Getting back out is the same problem from the
+   other side, and worse for being a room you cannot see the shape of.
 
    The scene has a baked NavMesh — `CharacterBot` drives a `NavMeshAgent`, `GameManager`
    sets `NavMesh.pathfindingIterationsPerFrame`, `NavmeshPoint` calls
@@ -218,26 +219,21 @@ Two usable facts for drop advice:
    `path.status` says up front whether a building can be entered — which is what stops a
    player circling a sealed prop forever.
 
-   `NavMeshDiagnostics` (Y key) answers exactly that, and nothing else: it samples the
-   floor at the centre of the nearest landmark's footprint and reports whether the walkable
-   point it found lands inside the footprint or out on the street. Inside → build the
-   routing. Outside → interiors are not baked, and doorways have to be found by hand, most
-   likely by sweeping a dense ray fan across a wall face and keeping the contiguous no-hit
-   spans that work out to a door's width rather than a building's edge.
+   A throwaway probe on the Y key settled it and was then deleted — the answer is below,
+   and a key that only a developer can interpret is a key a player has to be told to
+   ignore. Two things it had to be honest about, both learned the hard way: paths start
+   from the *sampled* mesh point rather than from the player, so distances must be measured
+   from the path's own start, and whether the player is themselves on the mesh has to be
+   said out loud (sampled at 2 m, not 20 m) or a broken route has no explanation. It also
+   had to judge `status` before shape: a partial route is shorter than the straight line
+   because it stopped early, which is not evidence of anything.
 
-   **The reading that decides it is the detour, not the sample.** A walkable point inside
+   **The reading that decided it was the detour, not the sample.** A walkable point inside
    the footprint is weak evidence on its own — an axis-aligned box around a trailer
    contains plenty of open ground, and a bake that ignored the buildings entirely would
    also report "walkable inside". What cannot be faked is a route that travels 19 m to
    reach something 4 m away: it went round to an opening, which is only possible if the
-   bake carved the walls out. So the diagnostic reports route length against straight-line
-   distance, and cross-checks with a `Physics.Linecast` — arriving straight through solid
-   wall is the disproof.
-
-   Two things it must be honest about, both learned the hard way: paths start from the
-   *sampled* mesh point rather than from the player, so distances have to be measured from
-   the path's own start, and whether the player is themselves on the mesh has to be said
-   out loud (sampled at 2 m, not 20 m) or a broken route has no explanation.
+   bake carved the walls out.
 
    **Answered: interiors are baked, and the bake respects the walls.** Measured in-game:
    - Standing inside a shop and inside a big market, the player is *on* the navmesh, and
@@ -252,7 +248,7 @@ Two usable facts for drop advice:
    has to be judged on `status` before its shape means anything, and a small detour with a
    blocked line of sight is the *good* case, not the bad one.
 
-   **What `EntryGuide` does with that.** It never looks for a door. It picks the nearest
+   **What `DoorGuide` does with that.** It never looks for a door. It picks the nearest
    building with walkable ground inside its own footprint — which is also the test that
    rejects sealed props like trailers, so the guide never marches you across a field
    towards a building with no way in — then routes to that interior point and steers you
@@ -267,6 +263,17 @@ Two usable facts for drop advice:
    footprint test**, the same one the threshold callout uses, so "inside the shop" and
    "entered the shop" cannot contradict each other. A partial route is still followed — it
    walks you to the building — but says once that it may not reach the way in.
+
+   **Leaving** is the same machinery pointed the other way. Standing in a footprint is
+   never ambiguous, so one key covers both and never has to ask which you meant. The target
+   is a ring of candidate points around the outside of the building, and the winner is the
+   one with the shortest *complete route* rather than the nearest as the crow flies — a
+   player at the back of a church needs the door they can reach, not the patch of grass on
+   the far side of the wall beside them.
+8. **Reading the room you are in.** `DescribeInterior` leads with exits now, because
+   indoors the way out is the whole question and a church across the field is not an answer
+   to it. Other landmarks still get spoken, after the walls, once the useful part has been
+   heard.
 
 ## Runtime handles worth remembering
 

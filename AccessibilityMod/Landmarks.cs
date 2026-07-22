@@ -122,6 +122,26 @@ namespace AccessibilityMod
         }
 
         /// <summary>
+        /// The building this point is standing inside, if any. Nearest first, so a porch
+        /// that falls inside two footprints answers with the one you are actually in.
+        /// </summary>
+        public static bool TryFindContaining(Vector3 point, float radius, out Nearby building)
+        {
+            var nearby = FindNearby(point, radius);
+
+            for (int i = 0; i < nearby.Count; i++)
+            {
+                if (!IsInside(nearby[i].Bounds, point)) continue;
+
+                building = nearby[i];
+                return true;
+            }
+
+            building = default(Nearby);
+            return false;
+        }
+
+        /// <summary>
         /// Names the most distinctive building standing near a point, e.g. "church" or
         /// "radio tower", or null if nothing nearby is nameable. With withDistance, adds
         /// range and compass bearing; without, answers only when the landmark is close

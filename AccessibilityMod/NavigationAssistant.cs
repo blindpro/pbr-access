@@ -633,17 +633,14 @@ namespace AccessibilityMod
         /// The roof ray stays as the fallback, for the unnamed structures the landmark
         /// list knows nothing about.
         /// </summary>
-        public static bool IsIndoors(CharacterMultiplayer player, out string building)
+        private static bool IsIndoors(CharacterMultiplayer player, out string building)
         {
             building = null;
-            Vector3 position = player.transform.position;
 
-            var nearby = Landmarks.FindNearby(position, ThresholdSearchRadius);
-            for (int i = 0; i < nearby.Count; i++)
+            if (Landmarks.TryFindContaining(player.transform.position, ThresholdSearchRadius,
+                    out Landmarks.Nearby room))
             {
-                if (!Landmarks.IsInside(nearby[i].Bounds, position)) continue;
-
-                building = nearby[i].Name;
+                building = room.Name;
                 return true;
             }
 
@@ -654,10 +651,10 @@ namespace AccessibilityMod
         }
 
         /// <summary>
-        /// The overhead probe, which is now only the fallback. Public so the diagnostic
-        /// reports this reading rather than a lookalike of its own that could disagree.
+        /// The overhead probe, which is now only the fallback: it is what answers for the
+        /// structures the landmark list has no name for.
         /// </summary>
-        public static bool HasCeiling(CharacterMultiplayer player, out RaycastHit hit)
+        private static bool HasCeiling(CharacterMultiplayer player, out RaycastHit hit)
         {
             Vector3 origin = player.transform.position + Vector3.up * 1.5f;
             return Physics.Raycast(origin, Vector3.up, out hit, CeilingCheckHeight,
@@ -748,14 +745,22 @@ namespace AccessibilityMod
                 exits.Add(flankedLeft && flankedRight ? $"doorway {where}" : $"opening {where}");
             }
 
-            var parts = new List<string> { "Indoors" };
-            // Which building this is, and what else is out there, before the geometry.
-            parts.AddRange(NameLandmarks(player, nearby, InteriorLandmarkCount));
+            // Name the room you are standing in, but nothing else out there yet: indoors
+            // the way out is the whole question, and a church across the field is not an
+            // answer to it. The other landmarks still get said - after the walls, once the
+            // useful part has been heard.
+            Landmarks.TryFindContaining(player.transform.position, ThresholdSearchRadius,
+                out Landmarks.Nearby room);
+
+            var parts = new List<string> { room.Name == null ? "Indoors" : $"Indoors, {room.Name}" };
+
             if (exits.Count == 0)
                 parts.Add("no exits in reach");
             else
                 parts.AddRange(exits);
+
             parts.AddRange(walls);
+            parts.AddRange(NameLandmarks(player, nearby, InteriorLandmarkCount, room.Name));
 
             return string.Join(". ", parts.ToArray());
         }
@@ -856,13 +861,16 @@ namespace AccessibilityMod
 
         /// <summary>
         /// Names the closest landmarks in the player's own terms, skipping repeats so
-        /// three houses on one street don't use up the whole sentence.
+        /// three houses on one street don't use up the whole sentence. The room already
+        /// named in the opening words is skipped too, for the same reason.
         /// </summary>
         private static List<string> NameLandmarks(CharacterMultiplayer player,
-            List<Landmarks.Nearby> nearby, int max)
+            List<Landmarks.Nearby> nearby, int max, string skip = null)
         {
             var said = new List<string>();
             var names = new List<string>();
+
+            if (skip != null) names.Add(skip);
 
             for (int i = 0; i < nearby.Count && said.Count < max; i++)
             {
