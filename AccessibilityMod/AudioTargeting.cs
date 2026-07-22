@@ -84,6 +84,18 @@ namespace AccessibilityMod
         private int _awareEnemyId;
         private bool _awareBehindCover;
 
+        // Whether they are actually staying put. The bots have no cover logic at all
+        // - they path to ammo boxes and to the safe zone - but CharacterBot pins them
+        // within two metres of wherever they stand once they are fighting, so one
+        // caught mid-errand inside a building holds that doorway for as long as the
+        // fight lasts. That is worth saying, because it is the difference between
+        // pushing the door and waiting for them to walk back out.
+        private const float StillDistance = 0.75f;  // moved less than this between samples
+        private const float StillTimeToCall = 2f;   // ...for this long before it is news
+        private int _awareMoveId;
+        private Vector3 _awarePos;
+        private float _awareStill;
+
         // Behind-cover enemies get their own slow, dull pip at their world position,
         // so "someone is over there but you can't shoot them yet" is audible as
         // direction, not just as a spoken sentence.
@@ -280,6 +292,8 @@ namespace AccessibilityMod
             ClearTarget();
             _awareKey = null;
             _awareEnemyId = 0;
+            _awareMoveId = 0;
+            _awareStill = 0f;
             _spokeNoAmmo = false;
             _blockedFound = false;
             Targeting.ForgetRigs();
@@ -362,17 +376,32 @@ namespace AccessibilityMod
                 return;
             }
 
-            // Same exposure test the targeting scan uses, so "behind cover" and the
-            // absence of targeting beeps can never disagree.
-            bool behindCover = !Targeting.HasLineOfSight(player, aimOrigin, nearest, out Vector3 _);
+            int id = nearest.GetInstanceID();
+
+            // Tracked before any early return, or a target that never changes its
+            // callout would never accumulate the standing time either.
+            if (id == _awareMoveId && (nearestPos - _awarePos).magnitude < StillDistance)
+                _awareStill += AwarenessInterval;
+            else
+                _awareStill = 0f;
+            _awareMoveId = id;
+            _awarePos = nearestPos;
+
+            // Open and Partial are precisely the cases the targeting scan can see, so
+            // "behind cover" and the absence of targeting beeps still cannot disagree.
+            Targeting.Cover cover = Targeting.Classify(player, aimOrigin, nearest);
+            bool behindCover = cover != Targeting.Cover.Open && cover != Targeting.Cover.Partial;
 
             string direction = RelativeDirection(player.transform, nearestPos);
             string elevation = Elevation(player.transform.position.y, nearestPos.y);
             string where = elevation == null ? direction : direction + " " + elevation;
             bool isClose = nearestDist <= CloseRange;
 
-            int id = nearest.GetInstanceID();
-            string key = id + "|" + where + "|" + behindCover;
+            // Standing still is only worth a word when something is in the way -
+            // in the open it is just where they happen to be this second.
+            bool holding = _awareStill >= StillTimeToCall && cover != Targeting.Cover.Open;
+
+            string key = id + "|" + where + "|" + cover + "|" + holding;
 
             bool sameEnemy = id == _awareEnemyId;
             bool coverChanged = sameEnemy && behindCover != _awareBehindCover;
@@ -388,32 +417,55 @@ namespace AccessibilityMod
             _awarenessReTimer = isClose ? CloseReannounce : AwarenessReannounce;
 
             int meters = Mathf.RoundToInt(nearestDist);
+            string what = CoverPhrase(cover);
+            string hold = holding ? ", holding" : "";
             string phrase;
 
             if (isClose)
             {
                 // Urgent, and short enough to hear before it matters.
-                phrase = behindCover
-                    ? $"Enemy close behind cover, {where}"
-                    : $"Enemy close, {where}, {meters} meters";
+                phrase = what == null
+                    ? $"Enemy close, {where}, {meters} meters"
+                    : $"Enemy close {what}, {where}{hold}";
             }
-            else if (coverChanged)
+            else if (coverChanged && !behindCover)
             {
-                // The one transition worth naming: it flips whether shooting works.
-                phrase = behindCover
-                    ? $"Enemy took cover, {where}, {meters} meters"
-                    : $"Enemy in the open, {where}, {meters} meters";
+                // Stepping out is the transition worth its own words: it is the
+                // moment shooting starts working again.
+                phrase = $"Enemy in the open, {where}, {meters} meters";
+            }
+            else if (what == null)
+            {
+                phrase = $"Enemy {where}, {meters} meters";
             }
             else
             {
-                phrase = behindCover
-                    ? $"Enemy behind cover, {where}, {meters} meters"
-                    : $"Enemy {where}, {meters} meters";
+                // Going into cover needs no announcement of its own - naming the kind
+                // of cover already says it, and says which kind, which "took cover"
+                // never did.
+                phrase = $"Enemy {what}, {where}, {meters} meters{hold}";
             }
 
             // Close-range threats interrupt; everything else waits its turn behind
             // navigation and loot callouts.
             ScreenReaderManager.Speak(phrase, isClose);
+        }
+
+        /// <summary>
+        /// What to call the obstruction, phrased to follow "Enemy". Null when there
+        /// is nothing between you and them worth a word - silence is the fastest way
+        /// to say "all of them is shootable".
+        /// </summary>
+        private static string CoverPhrase(Targeting.Cover cover)
+        {
+            switch (cover)
+            {
+                case Targeting.Cover.Partial: return "partly exposed";
+                case Targeting.Cover.Low: return "behind low cover";
+                case Targeting.Cover.Indoors: return "inside";
+                case Targeting.Cover.Blocked: return "behind cover";
+                default: return null;
+            }
         }
 
         private static string Elevation(float playerY, float targetY)

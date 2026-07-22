@@ -107,6 +107,112 @@ namespace AccessibilityMod
         }
 
         /// <summary>
+        /// What is between us and them, in the terms a player would act on. "Behind
+        /// cover" alone covered a waist-high fence and two storeys of concrete with
+        /// the same three words, and those call for opposite decisions.
+        /// </summary>
+        public enum Cover
+        {
+            /// <summary>Every sampled joint is clear - the whole body is shootable.</summary>
+            Open,
+            /// <summary>Some joints clear: shootable, but a smaller target than it sounds.</summary>
+            Partial,
+            /// <summary>Nothing clear, but the space above them is - a wall or fence
+            /// they will stand up over. Worth holding the aim where they will appear.</summary>
+            Low,
+            /// <summary>Nothing clear, and there is a roof over them. They are in a
+            /// building, and shooting at the wall will never reach them.</summary>
+            Indoors,
+            /// <summary>Nothing clear, no roof: a building face, a hillside, a rock.</summary>
+            Blocked,
+        }
+
+        // How far above the head to look for a ceiling. Tall enough to clear a
+        // doorway and find the floor above, short enough that open sky stays open.
+        private const float RoofProbe = 6f;
+
+        // How far above the head has to be exposed before the obstruction counts as
+        // something they will rise over rather than something that simply stops the
+        // shot. Roughly the difference between crouching and standing.
+        private const float LowCoverProbe = 0.9f;
+
+        /// <summary>
+        /// Sorts the obstruction into something speakable. Deliberately not on the
+        /// hot path: the targeting scan asks <see cref="HasLineOfSight"/> about every
+        /// enemy many times a second, while this runs once a second for the single
+        /// nearest one, so it can afford the extra probes.
+        ///
+        /// Open and Partial are exactly the cases where <see cref="HasLineOfSight"/>
+        /// returns true - both count some joint as clear - so the spoken cover state
+        /// and the presence of targeting beeps can never contradict each other.
+        /// </summary>
+        public static Cover Classify(CharacterMultiplayer player, Vector3 origin,
+            CharacterMultiplayer target)
+        {
+            var points = RigOf(target).Points;
+            int clear = 0;
+            int total = 0;
+
+            if (points != null && points.Length > 0)
+            {
+                foreach (var joint in points)
+                {
+                    if (joint == null) continue;
+                    total++;
+                    if (IsClearPath(player, origin, joint.position)) clear++;
+                }
+            }
+            else
+            {
+                foreach (float height in FallbackHeights)
+                {
+                    total++;
+                    if (IsClearPath(player, origin, target.transform.position + Vector3.up * height))
+                        clear++;
+                }
+            }
+
+            if (total == 0) return Cover.Blocked;
+            if (clear == total) return Cover.Open;
+            if (clear > 0) return Cover.Partial;
+
+            Vector3 head = HeadOf(target);
+            if (IsBlockedAbove(player, head)) return Cover.Indoors;
+            if (IsClearPath(player, origin, head + Vector3.up * LowCoverProbe)) return Cover.Low;
+            return Cover.Blocked;
+        }
+
+        /// <summary>
+        /// A ceiling over this point. Bodies are skipped for the same reason they are
+        /// in <see cref="IsClearPath"/> - a team mate on a balcony is not a roof.
+        /// </summary>
+        private static bool IsBlockedAbove(CharacterMultiplayer player, Vector3 point)
+        {
+            int count = Physics.RaycastNonAlloc(point + Vector3.up * 0.1f, Vector3.up, _hits,
+                RoofProbe, AudioTargeting.GetObstacleMask(), QueryTriggerInteraction.Ignore);
+
+            for (int i = 0; i < count; i++)
+            {
+                if (IsBody(_hits[i].collider, player)) continue;
+                return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>The head joint, which is what has to clear cover for the rest of
+        /// them to follow.</summary>
+        private static Vector3 HeadOf(CharacterMultiplayer character)
+        {
+            // SampleBones leads with Head, so the first resolved joint is the head.
+            var points = RigOf(character).Points;
+            if (points != null && points.Length > 0 && points[0] != null)
+                return points[0].position;
+
+            return character.transform.position + Vector3.up * 1.6f;
+        }
+
+        /// <summary>
         /// Solid world geometry between here and there. People are deliberately not
         /// counted: a body standing in the way is not cover, and calling it cover
         /// made a squad mate crossing in front announce that the enemy had hidden.
