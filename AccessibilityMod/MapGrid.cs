@@ -124,18 +124,18 @@ namespace AccessibilityMod
         // ---------------------------------------------------------------- grid
 
         /// <summary>
-        /// A1 is the north west corner: columns run west to east, rows run north to
-        /// south, matching how the big map is drawn and how the F key already calls
-        /// north.
+        /// A1 is the south west corner: columns run west to east as A to J, rows count
+        /// up as you walk north. Numbers rising northward matches the compass the F key
+        /// already speaks, so "heading to D8" and "heading north" agree.
         /// </summary>
         private string GetCell(Vector3 worldPos)
         {
             float size = CellSize();
             float minX = _mapCenter.x - _mapHalfExtent;
-            float maxZ = _mapCenter.z + _mapHalfExtent;
+            float minZ = _mapCenter.z - _mapHalfExtent;
 
             int col = Mathf.FloorToInt((worldPos.x - minX) / size);
-            int row = Mathf.FloorToInt((maxZ - worldPos.z) / size);
+            int row = Mathf.FloorToInt((worldPos.z - minZ) / size);
 
             if (col < 0 || col >= Columns || row < 0 || row >= Rows) return null;
 
@@ -147,10 +147,10 @@ namespace AccessibilityMod
         {
             float size = CellSize();
             float minX = _mapCenter.x - _mapHalfExtent;
-            float maxZ = _mapCenter.z + _mapHalfExtent;
+            float minZ = _mapCenter.z - _mapHalfExtent;
 
             float intoColumn = Mathf.Repeat(worldPos.x - minX, size);
-            float intoRow = Mathf.Repeat(maxZ - worldPos.z, size);
+            float intoRow = Mathf.Repeat(worldPos.z - minZ, size);
 
             return Mathf.Min(
                 Mathf.Min(intoColumn, size - intoColumn),
