@@ -13,6 +13,9 @@ mainly:
 Where a fact lives in a Unity asset rather than in code (exact item names, capacities, damage
 numbers) that is called out explicitly.
 
+**Vanilla vs. modded.** Sections 1–8 describe the shipped game. Where the accessibility mod now
+changes that behaviour it is marked **[modded]** inline, and section 9 lists the keys.
+
 ---
 
 ## 1. Are there loot boxes?
@@ -102,9 +105,17 @@ characterInventory.weapon1 = currentAmmoBox.ReplaceItem(item, characterInventory
 
 The Glock 19 **is** your starting `"Handgun 01"` (Glock 19 is its `short_description`, set in the
 Unity asset). You never "get" a second gun — the pistol you always had is pushed from slot 1 into
-the empty slot 2 so your new rifle can take slot 1. The mod's own code already treats this as a
-special case: `HudReader.cs:327` and `NavigationAssistant.cs:588` both check
-`weapon1.name != "Handgun 01"` to decide whether you have a *real* weapon.
+the empty slot 2 so your new rifle can take slot 1.
+
+**[modded]** `WeaponSlotPatches` reverses this: while slot 2 is empty the new weapon goes *there*
+and the character switches to hold it, so the Glock stays in slot 1 and nothing is displaced. Once
+both slots are full the vanilla rule returns — a pickup replaces whatever you are holding.
+
+**[modded]** The pistol is also named properly now. Two readouts tested for the asset key
+`"Handgun 01"` and treated it as a placeholder, so the ammo key answered *"No weapon"* while a
+loaded pistol was in hand, and the draw announcement stayed silent for anyone who had not found
+something better. Both use `short_description` — "Glock 19" — and the first draw after landing is
+spoken.
 
 Once slot 2 is occupied, the swap stops happening — a further slot-1 pickup replaces slot 1 and the
 old weapon goes back into the pile (`ReplaceItem` swaps them, so the pile now contains your old gun).
@@ -161,18 +172,36 @@ subtraction, no headshot or limb multiplier — `weaponDamage` is a flat byte pe
 health is a flat byte out of 255. Grenades (`GrenadeScript.cs:79`) and the shrinking zone
 (`DamageZoneManager.cs:287`) go through the same unmitigated path.
 
-So in the current build, **armour is cosmetic + a HUD number.** Levels and durability are displayed
-but never applied. (Worth confirming against a newer build before relying on it, but nothing in this
-assembly applies them.)
+So in the stock build, **armour is cosmetic + a HUD number.** Levels and durability are displayed
+but never applied.
+
+**[modded]** `ArmorPatches` gives it teeth **in offline (bot) matches only**: 8% damage reduction
+per vest level plus 4% per helmet level, capped at 50%, never absorbing a hit entirely. It hooks
+`RPC_Damage` — the single door bullets, grenades and the zone all come through, and the one that
+both decides death and forwards the number that gets subtracted, so health loss and the death
+threshold move together. Patching `Damage` as well would apply the reduction twice.
+
+Three deliberate limits:
+- **Offline only.** Death is decided on the *shooter's* client from its own copy of your health.
+  Other players don't run the mod, so mitigating in a real room would leave you alive on your screen
+  and dead on theirs.
+- **Level, not durability.** `PickupsManager.items` holds one `Item` instance per kind and every
+  pile hands out references to *those same instances* — decrementing `item.value` would wear that
+  armour down for every other pile and every other character in the match. Levels are read-only.
+- **Bots too.** They loot vests and helmets, and armour that worked for one side only would be a
+  cheat rather than the mechanic the HUD has been describing. This does make armoured bots take
+  more shots; say the word if you want it player-only.
+- **Not the zone.** The damage zone passes `shooterActorId == 0`, which is skipped.
 
 Note also the `if (num < 1) num = 1;` clamp — the `Damage` RPC can never kill you. Death is decided
 separately by `RPC_Damage`, which calls `RPC_Dead` when `health - damage <= 0`.
 
-### Related mod bug
+### Related mod bug — fixed
 
-`HudReader.cs:394-397` reads `charInv.vest.id > 0` / `charInv.helmet.id > 0`. Both are `null` until
-you pick armour up, so the L key throws a `NullReferenceException` and falls into the catch-all
-short summary whenever you are unarmoured. Should be `charInv.vest != null`.
+`HudReader` read `charInv.vest.id > 0` / `charInv.helmet.id > 0`. Both are `null` until you pick
+armour up, so the L key threw a `NullReferenceException` and fell into the catch-all short summary
+whenever you were unarmoured — most of a match. It now reports what is worn, and what the
+mitigation is worth.
 
 ---
 
@@ -247,6 +276,18 @@ nothing on a gun that has no model for it.
 
 So mechanically: **scope > grip >>> silencer ≈ laser (cosmetic).**
 
+**[modded]** Every scope stat applies *only while aiming*, and aiming was bound to a mouse button
+and nothing else — so a scope could be found, carried, fitted and never once used. **X** toggles
+aim down sights (`Character.Update` computes `aiming = holdingButtonAim && CanAim()`, so setting the
+held flag is the whole of it), and the ammo readout names the fitted sight.
+
+**[modded]** The aim assist now accounts for the scope. It did not before and could not have: it
+steers the character directly rather than through `OnLook`, which is where the game applies the
+sight's sensitivity multiplier. The *geometry* needed nothing — a scope doesn't move the shot ray,
+and spread never decided damage — but the arrow-key turn and the assist's own pitch/yaw steps are
+now scaled by that same multiplier, so scoped aiming is fine and slow for the player instead of the
+assist slewing at full speed exactly where careful placement is the point.
+
 Attachments can also be kept loose in your bag and dragged onto a weapon later — that path
 (`OnEndDrag`, source `myInventory`) swaps the currently-fitted one back into the bag.
 
@@ -291,23 +332,82 @@ There are exactly two entry points in code:
 2. **The inventory screen (drag & drop).** Open the in-game menu → Inventory
    (`GameManager.OnInventory` → `InGameInventoryButton`), then drag the health item onto the
    **Use** drop zone (`PickupsManager.OnEndDrag`, `dropZone == use_frame`). The same zone also
-   accepts `grenade` and `fuel` items.
+   accepts `grenade` and `fuel` items. **This screen is unusable without a mouse — see §8.5.**
 
 There is **no keyboard heal binding in the vanilla input actions** (the full list is
 fire, reload, inspect, aim, holster, grenade, melee, run, jump, inventory-next, lock-cursor, move,
 look, map, inventory, select-weapon-1, select-weapon-2, interact, camera-mode, crouch, lean, lower,
-laser-toggle) and **the accessibility mod does not add one** — its bound keys are
-`LeftCtrl` fire, `F`, `H`, `Z`, `K`, `L`, `J`, `T`, `B`, `N`, `E`/arrows/Enter for the loot list.
+laser-toggle), so in the stock game **healing requires the mouse.**
 
-**This is the missing piece for a blind player: healing currently requires the mouse.** The clean
-fix is a one-line key in `HudReader`/`AccessibleInputController` calling
-`GameManager.Instance.GetComponent<PickupsManager>().UseHealthAuto()`, then speaking the result
-(and speaking "already healing" when `player.isHealing` is true). Nothing else needs patching —
-`UseHealthAuto` is public and does the whole job.
+**[modded]** Heals are now a third weapon slot rather than a new one-shot key:
+
+- **3** draws them — *"Heals, 2. Control to use"*, or *"No heals in bag"* if there are none.
+- **Left Control** — the same key that fires — drinks one. The input controller stands down while
+  the slot is out, so the fire key cannot fire and heal in the same frame.
+- **1** or **2** puts the gun back. Using your last heal disarms automatically, so Control never
+  becomes a dead key.
+- The finished channel reports the new health: *"Healed. Health 92 percent."*
+
+It routes through `PickupsManager.UseHealthAuto()` — the game's own path, which walks the bag, uses
+the first health item, removes it and refreshes the HUD — so there is no second copy of that logic
+to keep in step. `HealSlot.cs`.
+
+Heals can also be used from the accessible inventory (**I**, then Enter on the item).
 
 ---
 
-## 8. Quick reference: the full item table
+## 8.5. Why the inventory screen was unusable — and what replaced it
+
+You said you can't really use the inventory. That is not a settings problem; the screen is
+structurally unreachable from a keyboard:
+
+- **There is not a single `Selectable` in it.** `MenuNavigator` walks `Selectable` components
+  (buttons, toggles, sliders) — the thing it navigates simply does not exist here. Rows are bare
+  `Image`s carrying a `UIDragHandler`.
+- **Every operation is a mouse gesture** from a source rectangle to a target rectangle:
+  `OnBeginDrag` → `OnEndDrag(dragHandler, dropZone)`. Fitting a scope means dragging an icon onto
+  the correct one of ten small frames; there is no click-to-equip path at all.
+
+**[modded]** `InventoryMenu.cs` therefore does not try to drive that UI. It reads
+`CharacterInventory` — where the truth actually lives — and performs the same state changes
+`OnEndDrag` performs for each drop zone, then calls `Apply()` and `PickupsManager.Init()` so the
+visible screen agrees with what was spoken.
+
+| Key | Action |
+| --- | --- |
+| **I** | Open / close |
+| **Up / Down** | Move through equipment then bag |
+| **Enter** | Hold a weapon · use a heal, grenade or ammo · fit an attachment · take one off |
+| **Delete** / Backspace | Drop |
+| **Left Arrow** / Escape | Close |
+
+Rows are spoken with their slot, and **empty attachment mounts are listed too** — an empty scope
+mount is information, and walking the list is how the shape of your kit gets learned without seeing
+it. Two of the game's own rules are preserved rather than worked around: slot 1 is only emptied by
+promoting slot 2 into it (`Apply()` reads `weapon1` unconditionally and would throw on a null), and
+a swap that would overflow the bag is refused whole, so an attachment can't quietly cease to exist.
+
+The mod also suppresses the game's own inventory key while this is open — that screen unlocks the
+cursor, and it must not come up behind the accessible one.
+
+---
+
+## 9. Mod key reference
+
+| Key | Action |
+| --- | --- |
+| Left Control | Fire — or use a heal when the heal slot is drawn |
+| Left / Right Arrow | Turn (scaled by scope sensitivity while aiming) |
+| **X** | Toggle aim down sights *(new)* |
+| **3** | Draw heals; **1** / **2** put the weapon back *(new)* |
+| **I** | Accessible inventory *(new)* |
+| E | Loot list — Up/Down, Enter takes, Left/Escape closes |
+| H | Health · Z ammo (+ fitted sight) · K kills & players · L full status · J height |
+| F | Compass facing · B surroundings survey · N safe zone · T lock diagnostics |
+
+---
+
+## 10. Quick reference: the full item table
 
 `PickupsManager.ItemType` (17 types):
 
