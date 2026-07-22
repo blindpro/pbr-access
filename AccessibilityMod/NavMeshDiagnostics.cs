@@ -54,12 +54,16 @@ namespace AccessibilityMod
             var lines = new List<string> { "Navmesh check." };
             Vector3 playerPos = player.transform.position;
 
-            // What the threshold callout is deciding on, in the same words, so a wrong
-            // "entered the trailer" can be traced to what the ray actually hit.
+            // The threshold callout's own decision, plus the roof reading separately -
+            // they can now disagree, and which one is talking is the thing worth knowing.
+            lines.Add(NavigationAssistant.IsIndoors(player, out string room)
+                ? $"Reads as indoors{(room == null ? "" : ", in the " + room)}."
+                : "Reads as outdoors.");
+
             lines.Add(NavigationAssistant.HasCeiling(player, out RaycastHit roof)
-                ? $"Roof overhead: {Landmarks.NameOr(roof.transform, "something unnamed")} " +
-                  $"{Metres(roof.distance)} up, so it reads as indoors."
-                : "Nothing overhead, so it reads as outdoors.");
+                ? $"Roof overhead: {Landmarks.NameOr(roof.transform, "something unnamed")} "
+                  + $"{Metres(roof.distance)} up."
+                : "Nothing overhead.");
 
             if (!TryFindFooting(playerPos, out NavMeshHit standingOn, out string footing))
             {
@@ -145,6 +149,24 @@ namespace AccessibilityMod
 
             float straight = Vector3.Distance(from, to);
             float length = PathLength(path);
+
+            // Measured from the path's own start, which is the only honest reference.
+            Vector3 firstTurn = path.corners[1];
+            string shape = $"{path.corners.Length} corners, {Metres(length)} against "
+                           + $"{Metres(straight)} straight. First turn "
+                           + $"{DirectionTo(player.transform, firstTurn)}, "
+                           + $"{Metres(Vector3.Distance(from, firstTurn))} along.";
+
+            // A partial route never arrived, so nothing about walls can be read off it -
+            // of course it is shorter than the straight line, it stopped early. What it
+            // can say is how close it got before it gave up.
+            if (path.status == NavMeshPathStatus.PathPartial)
+            {
+                float shortBy = Vector3.Distance(path.corners[path.corners.Length - 1], to);
+                return $"Route stops short, {shape} Gave up {Metres(shortBy)} from it. "
+                       + "No verdict on walls from a route that never arrived.";
+            }
+
             bool blocked = Physics.Linecast(from + Vector3.up, to + Vector3.up,
                 GetSolidMask(), QueryTriggerInteraction.Ignore);
 
@@ -152,21 +174,20 @@ namespace AccessibilityMod
             if (length > straight * DetourRatio)
                 verdict = "It goes the long way round, so the bake knows the walls are there "
                           + "and this route is using an opening.";
+            else if (blocked && path.corners.Length > 2)
+                // The reading that matters, and the one the first version of this got
+                // wrong: bending round solid geometry, even by a little, is the bake
+                // proving it knows the geometry is there.
+                verdict = "It bends around solid geometry rather than crossing it, so the "
+                          + "bake knows the walls are there.";
             else if (blocked)
-                verdict = "It arrives in a straight line through solid wall, so the bake "
+                verdict = "It arrives dead straight through solid wall, so the bake "
                           + "ignored the buildings and cannot find doors for us.";
             else
                 verdict = "Straight there, but nothing solid is in the way, so this tells "
                           + "us nothing either way. Try it from behind the building.";
 
-            // Measured from the path's own start, which is the only honest reference.
-            Vector3 firstTurn = path.corners[1];
-            string status = path.status == NavMeshPathStatus.PathComplete
-                ? "Route complete" : "Route partial, it stops short";
-
-            return $"{status}, {path.corners.Length} corners, {Metres(length)} against "
-                   + $"{Metres(straight)} straight. First turn {DirectionTo(player.transform, firstTurn)}, "
-                   + $"{Metres(Vector3.Distance(from, firstTurn))} along. " + verdict;
+            return $"Route complete, {shape} {verdict}";
         }
 
         private static float PathLength(NavMeshPath path)

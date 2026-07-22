@@ -81,6 +81,7 @@ namespace AccessibilityMod
         private bool _pendingIndoors;
         private string _insideOf;
         private const float ThresholdSearchRadius = 25f;
+        private const float FootprintInset = 2f;
 
         // Weapon draw tracking
         private string _lastWeaponName;
@@ -638,39 +639,39 @@ namespace AccessibilityMod
             if (_indoorCheckTimer > 0f) return;
             _indoorCheckTimer = IndoorCheckInterval;
 
-            bool hasCeiling = HasCeiling(player, out RaycastHit _);
+            bool indoors = IsIndoors(player, out string building);
 
             // First check of a life only records where we are; there is no threshold to
             // announce when you have just landed.
             if (!_indoorStateSet)
             {
-                _isIndoors = hasCeiling;
-                _pendingIndoors = hasCeiling;
+                _isIndoors = indoors;
+                _pendingIndoors = indoors;
                 _indoorStateSet = true;
-                if (hasCeiling) _insideOf = BuildingHere(player);
+                _insideOf = indoors ? building : null;
                 return;
             }
 
-            if (hasCeiling == _isIndoors)
+            if (indoors == _isIndoors)
             {
-                _pendingIndoors = hasCeiling;
+                _pendingIndoors = indoors;
                 return;
             }
 
             // Hold the change for a second check before speaking it. A tree, an awning or
-            // a container passed under flips the ceiling ray for one reading, and
-            // "entered the house, left the house" a second apart is worse than silence.
-            if (hasCeiling != _pendingIndoors)
+            // a container passed under flips the reading for one check, and "entered the
+            // house, left the house" a second apart is worse than silence.
+            if (indoors != _pendingIndoors)
             {
-                _pendingIndoors = hasCeiling;
+                _pendingIndoors = indoors;
                 return;
             }
 
-            _isIndoors = hasCeiling;
+            _isIndoors = indoors;
 
             if (_isIndoors)
             {
-                _insideOf = BuildingHere(player);
+                _insideOf = building;
                 ScreenReaderManager.Speak(_insideOf == null ? "Indoors" : $"Entered the {_insideOf}");
                 return;
             }
@@ -680,9 +681,57 @@ namespace AccessibilityMod
         }
 
         /// <summary>
-        /// The overhead probe the threshold callout decides on: something solid within
-        /// reach above the player's head means a roof. Public so the diagnostic reports
-        /// this reading rather than a lookalike of its own that could disagree with it.
+        /// Whether the player is inside a building, and which one.
+        ///
+        /// Standing in its footprint is the test that carries this, not a roof overhead.
+        /// The roof ray was alone here and it was wrong all the time: these buildings do
+        /// not reliably have a collider above head height to find - open eaves, a roof
+        /// that is one thin mesh, a shop with no ceiling geometry at all - so a player
+        /// stood squarely inside a shop was told they were outdoors. The footprint is
+        /// solid ground for the same reason the survey can already say "shop here".
+        ///
+        /// The roof ray stays as the fallback, for the unnamed structures the landmark
+        /// list knows nothing about.
+        /// </summary>
+        public static bool IsIndoors(CharacterMultiplayer player, out string building)
+        {
+            building = null;
+            Vector3 position = player.transform.position;
+
+            var nearby = Landmarks.FindNearby(position, ThresholdSearchRadius);
+            for (int i = 0; i < nearby.Count; i++)
+            {
+                if (!Footprint(nearby[i].Bounds).Contains(position)) continue;
+
+                building = nearby[i].Name;
+                return true;
+            }
+
+            if (!HasCeiling(player, out RaycastHit _)) return false;
+
+            building = BuildingHere(player);
+            return true;
+        }
+
+        /// <summary>
+        /// The footprint, pulled in at the sides. The box is axis aligned, so a building
+        /// standing at an angle to the world drags a wedge of open ground in at each
+        /// corner, and standing on that ground is not being inside. Small buildings are
+        /// inset proportionally: taking two metres off every side of a trailer would
+        /// leave nothing to stand in.
+        /// </summary>
+        private static Bounds Footprint(Bounds bounds)
+        {
+            float insetX = Mathf.Min(FootprintInset, bounds.extents.x * 0.5f);
+            float insetZ = Mathf.Min(FootprintInset, bounds.extents.z * 0.5f);
+
+            bounds.Expand(new Vector3(-insetX * 2f, 0f, -insetZ * 2f));
+            return bounds;
+        }
+
+        /// <summary>
+        /// The overhead probe, which is now only the fallback. Public so the diagnostic
+        /// reports this reading rather than a lookalike of its own that could disagree.
         /// </summary>
         public static bool HasCeiling(CharacterMultiplayer player, out RaycastHit hit)
         {

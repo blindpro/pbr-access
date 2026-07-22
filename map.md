@@ -238,6 +238,19 @@ Two usable facts for drop advice:
    the path's own start, and whether the player is themselves on the mesh has to be said
    out loud (sampled at 2 m, not 20 m) or a broken route has no explanation.
 
+   **Answered: interiors are baked, and the bake respects the walls.** Measured in-game:
+   - Standing inside a shop and inside a big market, the player is *on* the navmesh, and
+     the walkable point nearest the middle of each footprint lands 1 m from that middle.
+   - At a trailer, the nearest walkable point to the middle is 2 m *outside* the
+     footprint. That is the control: a bake that ignored buildings would have answered
+     "walkable inside" there too, so the mesh is genuinely carved around solid props.
+   - Routes bend — 4 and 8 corners — rather than running dead straight.
+
+   So `NavMesh.CalculatePath` is a usable door-finder. Two cautions the readings also
+   handed us: `PathPartial` is common (interior islands that do not connect), so a route
+   has to be judged on `status` before its shape means anything, and a small detour with a
+   blocked line of sight is the *good* case, not the bad one.
+
 ## Runtime handles worth remembering
 
 | What | Where |
