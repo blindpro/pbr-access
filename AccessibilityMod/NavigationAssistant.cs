@@ -75,6 +75,9 @@ namespace AccessibilityMod
         private bool _indoorStateSet;
         private const float IndoorCheckInterval = 1f;
         private float _indoorCheckTimer;
+        private bool _pendingIndoors;
+        private string _insideOf;
+        private const float ThresholdSearchRadius = 25f;
 
         // Weapon draw tracking
         private string _lastWeaponName;
@@ -93,6 +96,11 @@ namespace AccessibilityMod
             if (player.IsDead())
             {
                 _lastWeaponName = null;
+
+                // Same for the threshold: the next spawn starts outdoors somewhere else,
+                // and should not be told it left the building this body died in.
+                _indoorStateSet = false;
+                _insideOf = null;
                 return;
             }
 
@@ -616,6 +624,11 @@ namespace AccessibilityMod
             _lastWeaponName = weaponName;
         }
 
+        /// <summary>
+        /// Calls the threshold, by name where the building has one: "entered the church"
+        /// rather than "indoors". Crossing into a building is a moment worth marking —
+        /// it is where the walls, the loot and the danger all change at once.
+        /// </summary>
         private void CheckIndoorOutdoor(CharacterMultiplayer player)
         {
             _indoorCheckTimer -= ScanInterval;
@@ -628,19 +641,64 @@ namespace AccessibilityMod
             bool hasCeiling = Physics.Raycast(origin, Vector3.up, out RaycastHit _, CeilingCheckHeight,
                 GetObstacleMask(), QueryTriggerInteraction.Ignore);
 
-            if (hasCeiling != _isIndoors || !_indoorStateSet)
+            // First check of a life only records where we are; there is no threshold to
+            // announce when you have just landed.
+            if (!_indoorStateSet)
             {
                 _isIndoors = hasCeiling;
-
-                if (_indoorStateSet) // Don't announce on first check
-                {
-                    if (_isIndoors)
-                        ScreenReaderManager.Speak("Indoors");
-                    else
-                        ScreenReaderManager.Speak("Outdoors");
-                }
+                _pendingIndoors = hasCeiling;
                 _indoorStateSet = true;
+                if (hasCeiling) _insideOf = BuildingHere(player);
+                return;
             }
+
+            if (hasCeiling == _isIndoors)
+            {
+                _pendingIndoors = hasCeiling;
+                return;
+            }
+
+            // Hold the change for a second check before speaking it. A tree, an awning or
+            // a container passed under flips the ceiling ray for one reading, and
+            // "entered the house, left the house" a second apart is worse than silence.
+            if (hasCeiling != _pendingIndoors)
+            {
+                _pendingIndoors = hasCeiling;
+                return;
+            }
+
+            _isIndoors = hasCeiling;
+
+            if (_isIndoors)
+            {
+                _insideOf = BuildingHere(player);
+                ScreenReaderManager.Speak(_insideOf == null ? "Indoors" : $"Entered the {_insideOf}");
+                return;
+            }
+
+            ScreenReaderManager.Speak(_insideOf == null ? "Outdoors" : $"Left the {_insideOf}");
+            _insideOf = null;
+        }
+
+        /// <summary>
+        /// What building the player is standing in, or null if nothing named is close
+        /// enough to be the one around them. Inside a church every wall and pillar is a
+        /// collider a few metres off, so the nearest landmark is the right answer.
+        /// </summary>
+        private static string BuildingHere(CharacterMultiplayer player)
+        {
+            var nearby = Landmarks.FindNearby(player.transform.position, ThresholdSearchRadius);
+
+            for (int i = 0; i < nearby.Count; i++)
+                if (nearby[i].Bounds.Contains(player.transform.position))
+                    return nearby[i].Name;
+
+            // Not inside any footprint - a porch, an archway, a doorway half-crossed.
+            // The nearest is still the building it belongs to, if it is within touching
+            // distance.
+            if (nearby.Count > 0 && nearby[0].Distance <= StandingInside) return nearby[0].Name;
+
+            return null;
         }
 
         /// <summary>

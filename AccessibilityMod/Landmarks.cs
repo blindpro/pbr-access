@@ -24,7 +24,12 @@ namespace AccessibilityMod
             public string Name;
             public int Rank;
             public float Distance;
+
+            /// <summary>Nearest point on the building: what to walk towards.</summary>
             public Vector3 Position;
+
+            /// <summary>Every collider of it together, so Bounds.center is inside the walls.</summary>
+            public Bounds Bounds;
         }
 
         /// <summary>
@@ -60,24 +65,35 @@ namespace AccessibilityMod
                 if (!TryFind(hit.transform, out Transform root, out string name, out int rank)) continue;
 
                 Vector3 closest = hit.bounds.ClosestPoint(queryPos);
-                var entry = new Nearby
-                {
-                    Name = name,
-                    Rank = rank,
-                    Distance = Vector3.Distance(queryPos, closest),
-                    Position = closest
-                };
+                float distance = Vector3.Distance(queryPos, closest);
 
-                // One church, however many colliders it was built from: keep whichever
-                // piece of it is nearest.
+                // One church, however many colliders it was built from: the footprint
+                // grows to hold them all, while distance and bearing stay pinned to
+                // whichever piece of it is nearest.
                 if (index.TryGetValue(root, out int existing))
                 {
-                    if (entry.Distance < found[existing].Distance) found[existing] = entry;
+                    Nearby merged = found[existing];
+                    merged.Bounds.Encapsulate(hit.bounds);
+
+                    if (distance < merged.Distance)
+                    {
+                        merged.Distance = distance;
+                        merged.Position = closest;
+                    }
+
+                    found[existing] = merged;
                     continue;
                 }
 
                 index[root] = found.Count;
-                found.Add(entry);
+                found.Add(new Nearby
+                {
+                    Name = name,
+                    Rank = rank,
+                    Distance = distance,
+                    Position = closest,
+                    Bounds = hit.bounds
+                });
             }
 
             found.Sort((a, b) => a.Distance.CompareTo(b.Distance));

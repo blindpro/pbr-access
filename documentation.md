@@ -405,6 +405,11 @@ cursor, and it must not come up behind the accessible one.
 | H | Health · Z ammo (+ fitted sight) · K kills & players · L full status · J height |
 | F | Compass facing · B surroundings survey (names buildings: "church ahead 30 meters") · N safe zone · T lock diagnostics |
 | **P** | Position: map square and nearest landmark — e.g. "D2. Church 40 meters north east" *(new)* |
+| **Y** | Navmesh check — a developer probe for whether pathfinding reaches inside buildings *(new)* |
+
+Crossing a threshold is announced by name as it happens: "entered the church", "left the
+church". It is held for a second reading first, so an awning or a container passed under
+does not produce a pair of callouts a second apart.
 
 ---
 

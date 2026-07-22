@@ -202,6 +202,27 @@ Two usable facts for drop advice:
    for structures no prefab name covers. Rays alone made `B` miss what `P` had just
    named — a ridge in the way, a bungalow the confirming ray flew over, or a tower
    sitting in one of the ~20 m gaps between rays at that range.
+6. ~~**Threshold callouts.**~~ Done — `NavigationAssistant.CheckIndoorOutdoor` names the
+   building it is speaking about: "entered the church", "left the church". The ceiling ray
+   was already there; what it lacked was a name and a second reading to confirm the change
+   before speaking it.
+7. **Getting through the door.** The open problem. Finding a building is solved; entering
+   one is not, and a doorway is a metre-wide gap that the callouts step straight past.
+
+   The scene has a baked NavMesh — `CharacterBot` drives a `NavMeshAgent`, `GameManager`
+   sets `NavMesh.pathfindingIterationsPerFrame`, `NavmeshPoint` calls
+   `NavMesh.SamplePosition`, and the game ships `UnityEngine.AIModule`. If that bake
+   covers interiors, doors need no geometry at all: `NavMesh.CalculatePath` to a point
+   inside returns corners that bend through the entrance, so corner 1 *is* the door, and
+   `path.status` says up front whether a building can be entered — which is what stops a
+   player circling a sealed prop forever.
+
+   `NavMeshDiagnostics` (Y key) answers exactly that, and nothing else: it samples the
+   floor at the centre of the nearest landmark's footprint and reports whether the walkable
+   point it found lands inside the footprint or out on the street. Inside → build the
+   routing. Outside → interiors are not baked, and doorways have to be found by hand, most
+   likely by sweeping a dense ray fan across a wall face and keeping the contiguous no-hit
+   spans that work out to a door's width rather than a building's edge.
 
 ## Runtime handles worth remembering
 
@@ -211,6 +232,7 @@ Two usable facts for drop advice:
 | Player parachute state | `player.GetComponent<CharacterParachute>()` — `isOnAirplane`, `isParachuting`, `isParachuteOpen`, `canJumpFromPlane`, `canOpenParachute` |
 | Loot boxes (close-range help only, per §3) | `GameManager.Instance.GetComponent<PickupsManager>().ammoBoxes` / `.ammoBoxesAchievable` |
 | Zone, current and next | `GameManager.Instance.GetComponent<DamageZoneManager>()` — `damageZone`, `GetTargetDamageZonePos()`, `GetTargetDamageZoneRadius()`, `IsShrinking()` |
+| Pathfinding | A baked NavMesh the bots walk — `CharacterBot.agent` (`NavMeshAgent`), `NavmeshPoint.GetNearestNavMeshPoint`. Queryable without touching the bots: `NavMesh.SamplePosition`, `NavMesh.CalculatePath` |
 | Map extents | `GameManager.Instance.bigMapCamera` — world `transform.position` + `orthographicSize`. What `MapGrid` uses; it is the camera the game renders its own full-screen map with, so squares line up with what a sighted player reads |
 | Glide tuning | `Movement` — `flyControlMultiplierMinMax`, `flyGravity`, `parachuteGravity`, `speedRunning` (private/serialized; reflection or just hardcode the observed 1–3x, 2.0, 1.0, 6.8) |
 
