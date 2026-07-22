@@ -45,7 +45,19 @@ namespace AccessibilityMod
         [HarmonyPatch(typeof(GameManager), "OnLockCursor")]
         static bool GameManager_OnLockCursor_Prefix()
         {
-            return !LootMenu.BlocksPause;
+            return !LootMenu.BlocksPause && !InventoryMenu.BlocksGameInventory;
+        }
+
+        /// <summary>
+        /// The game's own inventory screen is mouse-only drag and drop, and opening
+        /// it unlocks the cursor. Whichever key it is bound to, it must not come up
+        /// behind the accessible inventory.
+        /// </summary>
+        [HarmonyPrefix]
+        [HarmonyPatch(typeof(GameManager), "OnInventory")]
+        static bool GameManager_OnInventory_Prefix()
+        {
+            return !InventoryMenu.BlocksGameInventory;
         }
 
         /// <summary>

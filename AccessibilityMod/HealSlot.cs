@@ -49,8 +49,8 @@ namespace AccessibilityMod
 
             AnnounceFinishedHeal(player);
 
-            // The loot list owns the keyboard while it is open.
-            if (LootMenu.IsOpen) return;
+            // The loot list and the inventory own the keyboard while they are open.
+            if (LootMenu.IsOpen || InventoryMenu.IsOpen) return;
 
             if (Pressed(KeyCode.Alpha3, KeyCode.Keypad3))
             {

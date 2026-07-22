@@ -70,6 +70,9 @@ namespace AccessibilityMod
             var pickupsMgr = GetPickupsManager();
             if (pickupsMgr == null) return;
 
+            // E must not open a pile behind an open inventory.
+            if (!IsOpen && InventoryMenu.IsOpen) return;
+
             if (IsOpen)
                 HandleOpen(player, pickupsMgr);
             else if (Input.GetKeyDown(KeyCode.E))
@@ -249,10 +252,7 @@ namespace AccessibilityMod
 
         private static string Label(PickupsManager.Item item)
         {
-            string name = !string.IsNullOrEmpty(item.short_description)
-                ? item.short_description : item.description;
-            if (string.IsNullOrEmpty(name)) name = item.name;
-            return item.level > 0 ? $"{name}, level {item.level}" : name;
+            return ItemText.Describe(item);
         }
 
         private static PickupsManager GetPickupsManager()

@@ -12,6 +12,7 @@ namespace AccessibilityMod
         private AimAssist _aimAssist;
         private AudioTargeting _audioTargeting;
         private LootMenu _lootMenu;
+        private InventoryMenu _inventoryMenu;
         private HealSlot _healSlot;
         private SafeZoneNav _safeZoneNav;
         private LockDiagnostics _lockDiagnostics;
@@ -26,6 +27,7 @@ namespace AccessibilityMod
             _aimAssist = new AimAssist();
             _audioTargeting = new AudioTargeting();
             _lootMenu = new LootMenu();
+            _inventoryMenu = new InventoryMenu();
             _healSlot = new HealSlot();
             _safeZoneNav = new SafeZoneNav();
             _lockDiagnostics = new LockDiagnostics();
@@ -44,6 +46,7 @@ namespace AccessibilityMod
                 // The loot list runs first: it claims E, Up, Down and Enter while
                 // it is open, before anything else can act on them.
                 _lootMenu.Tick();
+                _inventoryMenu.Tick();
                 _menuNavigator.Tick();
                 _hudReader.Tick();
                 // Before the input controller: the heal slot decides whether Left
