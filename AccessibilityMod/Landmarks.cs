@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace AccessibilityMod
@@ -17,6 +18,72 @@ namespace AccessibilityMod
         private const float SearchRadius = 80f;
         private const float NearbyDistance = 40f;
 
+        /// <summary>A named building standing near a point.</summary>
+        public struct Nearby
+        {
+            public string Name;
+            public int Rank;
+            public float Distance;
+            public Vector3 Position;
+        }
+
+        /// <summary>
+        /// Every named building inside the radius, nearest first, one entry per building
+        /// rather than one per collider.
+        ///
+        /// A volume query, so it sees through hills, fences and roofs. That is the point:
+        /// both the map readout and the surroundings survey want to know what is standing
+        /// there, not what happens to be in line of sight from eye height.
+        ///
+        /// Distance and bearing are to the nearest corner of the building's bounds — the
+        /// part you would actually walk to. A church's pivot can sit tens of metres from
+        /// its wall, and two keys quoting different numbers for one church reads as a bug.
+        /// </summary>
+        public static List<Nearby> FindNearby(Vector3 worldPos, float radius)
+        {
+            // From the plane or under an open parachute we are hundreds of metres up,
+            // where a sphere of this size touches nothing. Ask at ground level instead,
+            // so the answer is about the place below us rather than the empty air.
+            Vector3 queryPos = DropToGround(worldPos);
+
+            var hits = Physics.OverlapSphere(queryPos, radius, GetMask(),
+                QueryTriggerInteraction.Ignore);
+
+            var found = new List<Nearby>();
+            var index = new Dictionary<Transform, int>();
+
+            for (int i = 0; i < hits.Length; i++)
+            {
+                var hit = hits[i];
+                if (hit == null) continue;
+
+                if (!TryFind(hit.transform, out Transform root, out string name, out int rank)) continue;
+
+                Vector3 closest = hit.bounds.ClosestPoint(queryPos);
+                var entry = new Nearby
+                {
+                    Name = name,
+                    Rank = rank,
+                    Distance = Vector3.Distance(queryPos, closest),
+                    Position = closest
+                };
+
+                // One church, however many colliders it was built from: keep whichever
+                // piece of it is nearest.
+                if (index.TryGetValue(root, out int existing))
+                {
+                    if (entry.Distance < found[existing].Distance) found[existing] = entry;
+                    continue;
+                }
+
+                index[root] = found.Count;
+                found.Add(entry);
+            }
+
+            found.Sort((a, b) => a.Distance.CompareTo(b.Distance));
+            return found;
+        }
+
         /// <summary>
         /// Names the most distinctive building standing near a point, e.g. "church" or
         /// "radio tower", or null if nothing nearby is nameable. With withDistance, adds
@@ -25,45 +92,22 @@ namespace AccessibilityMod
         /// </summary>
         public static string DescribeNearest(Vector3 worldPos, bool withDistance)
         {
-            // From the plane or under an open parachute we are hundreds of metres up,
-            // where a sphere of this size touches nothing. Ask at ground level instead,
-            // so the answer is about the place below us rather than the empty air.
-            worldPos = DropToGround(worldPos);
+            var nearby = FindNearby(worldPos, SearchRadius);
+            if (nearby.Count == 0) return null;
 
-            var hits = Physics.OverlapSphere(worldPos, SearchRadius, GetMask(),
-                QueryTriggerInteraction.Ignore);
-
-            string bestName = null;
-            int bestRank = int.MaxValue;
-            float bestDistance = float.MaxValue;
-            Vector3 bestPos = Vector3.zero;
-
-            for (int i = 0; i < hits.Length; i++)
-            {
-                var hit = hits[i];
-                if (hit == null) continue;
-
-                if (!TryName(hit.transform, out string name, out int rank)) continue;
-
-                float distance = Vector3.Distance(worldPos, hit.transform.position);
-
-                // A landmark that says more wins outright; ties go to the closer one.
-                if (rank > bestRank) continue;
-                if (rank == bestRank && distance >= bestDistance) continue;
-
-                bestName = name;
-                bestRank = rank;
-                bestDistance = distance;
-                bestPos = hit.transform.position;
-            }
-
-            if (bestName == null) return null;
+            // A landmark that says more wins outright; ties go to the closer one, and the
+            // list already arrives closest first.
+            Nearby best = nearby[0];
+            for (int i = 1; i < nearby.Count; i++)
+                if (nearby[i].Rank < best.Rank) best = nearby[i];
 
             if (!withDistance)
-                return bestDistance <= NearbyDistance ? bestName : null;
+                return best.Distance <= NearbyDistance ? best.Name : null;
 
-            int metres = Mathf.RoundToInt(bestDistance);
-            return $"{bestName} {metres} meters {GetCardinalTo(worldPos, bestPos)}";
+            int metres = Mathf.RoundToInt(best.Distance);
+            // Dropping to the ground only changed our height, so the bearing is the same
+            // one either point would give.
+            return $"{best.Name} {metres} meters {GetCardinalTo(worldPos, best.Position)}";
         }
 
         /// <summary>
@@ -73,6 +117,16 @@ namespace AccessibilityMod
         /// </summary>
         public static bool TryName(Transform transform, out string name, out int rank)
         {
+            return TryFind(transform, out Transform _, out name, out rank);
+        }
+
+        /// <summary>
+        /// As TryName, and also hands back the object that carried the name, which is
+        /// what tells two churches apart when a query returns every collider of both.
+        /// </summary>
+        public static bool TryFind(Transform transform, out Transform root, out string name, out int rank)
+        {
+            root = null;
             name = null;
             rank = int.MaxValue;
 
@@ -87,6 +141,7 @@ namespace AccessibilityMod
 
                     // Known is ordered most distinctive first, so the first hit at this
                     // depth is the best name this object can give.
+                    root = current;
                     name = Known[i].Spoken;
                     rank = i;
                     return true;

@@ -197,6 +197,11 @@ Two usable facts for drop advice:
 5. ~~**Landmark naming from prefab names.**~~ Done — `Landmarks`, shared by the grid
    readout and by both building callouts in `NavigationAssistant`, so the `B` survey and
    the passive distance scan say "church ahead" rather than "building ahead".
+   `Landmarks.FindNearby` is now the shared source of buildings, not just of names: the
+   `B` survey seeds itself from the same sphere `P` asks, and keeps its raycast sweep only
+   for structures no prefab name covers. Rays alone made `B` miss what `P` had just
+   named — a ridge in the way, a bungalow the confirming ray flew over, or a tower
+   sitting in one of the ~20 m gaps between rays at that range.
 
 ## Runtime handles worth remembering
 

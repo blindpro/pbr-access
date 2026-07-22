@@ -66,6 +66,8 @@ namespace AccessibilityMod
         private const float SurveySweepStep = 22.5f;     // 16 rays around the circle
         private const float SurveyMergeArc = 45f;        // one building claims this much arc
         private const int SurveyMaxBuildings = 3;        // beyond this it stops being a sentence
+        private const int InteriorLandmarkCount = 2;     // named buildings the indoor report still mentions
+        private const float StandingInside = 3f;         // this close, its walls are the walls around you
 
         // Indoor/outdoor detection
         private const float CeilingCheckHeight = 20f;
@@ -653,8 +655,16 @@ namespace AccessibilityMod
             bool indoors = Physics.Raycast(origin, Vector3.up, CeilingCheckHeight,
                 GetObstacleMask(), QueryTriggerInteraction.Ignore);
 
+            // The same query the map key asks, so anything P can name is available to
+            // both branches. Indoors matters as much as out: a tree, an awning or a
+            // bridge overhead is enough to take the indoor path, and the church across
+            // the field is still the thing worth knowing about.
+            var nearby = Landmarks.FindNearby(player.transform.position, BuildingMaxDistance);
+
             // Explicitly requested, so it interrupts whatever else was talking.
-            ScreenReaderManager.Speak(indoors ? DescribeInterior(player) : DescribeExterior(player));
+            ScreenReaderManager.Speak(indoors
+                ? DescribeInterior(player, nearby)
+                : DescribeExterior(player, nearby));
         }
 
         /// <summary>
@@ -662,7 +672,7 @@ namespace AccessibilityMod
         /// player acts on, then the walls that box them in. A clear line flanked by
         /// close walls is a doorway; a clear line with nothing beside it is open space.
         /// </summary>
-        private string DescribeInterior(CharacterMultiplayer player)
+        private string DescribeInterior(CharacterMultiplayer player, List<Landmarks.Nearby> nearby)
         {
             Vector3 origin = player.transform.position + Vector3.up * 1f;
             Transform t = player.transform;
@@ -697,6 +707,8 @@ namespace AccessibilityMod
             }
 
             var parts = new List<string> { "Indoors" };
+            // Which building this is, and what else is out there, before the geometry.
+            parts.AddRange(NameLandmarks(player, nearby, InteriorLandmarkCount));
             if (exits.Count == 0)
                 parts.Add("no exits in reach");
             else
@@ -707,19 +719,29 @@ namespace AccessibilityMod
         }
 
         /// <summary>
-        /// Sweeps the full circle for buildings and reports the nearest few. Each
-        /// reported building claims a wide arc around itself, so one big structure
-        /// spanning several rays is announced once rather than three times.
+        /// Reports the nearest few buildings all the way round.
+        ///
+        /// Named landmarks come straight from the landmark query, so whatever the map key
+        /// can name is in here too. This used to be sixteen rays and nothing else, which
+        /// meant a church the map key was happily naming went unmentioned whenever a
+        /// ridge ate the ray, whenever the building was short enough for the confirming
+        /// ray to fly over it, or whenever it simply sat in one of the twenty-metre gaps
+        /// between rays at that range.
+        ///
+        /// The sweep still runs, doing the one thing the query cannot: calling the
+        /// structures no prefab name covers, which is most of the map.
         /// </summary>
-        private string DescribeExterior(CharacterMultiplayer player)
+        private string DescribeExterior(CharacterMultiplayer player, List<Landmarks.Nearby> nearby)
         {
-            Vector3 origin = player.transform.position + Vector3.up * 3f;
             Transform t = player.transform;
-            int mask = GetObstacleMask();
+            var candidates = new List<Candidate>();
 
-            var angles = new List<float>();
-            var distances = new List<float>();
-            var hits = new List<Transform>();
+            for (int i = 0; i < nearby.Count; i++)
+                candidates.Add(new Candidate(nearby[i].Name, nearby[i].Distance,
+                    BearingTo(t, nearby[i].Position)));
+
+            Vector3 origin = t.position + Vector3.up * 3f;
+            int mask = GetObstacleMask();
 
             for (float angle = -180f; angle < 180f; angle += SurveySweepStep)
             {
@@ -728,50 +750,113 @@ namespace AccessibilityMod
                 if (!Physics.Raycast(origin, dir, out RaycastHit hit, BuildingMaxDistance,
                     mask, QueryTriggerInteraction.Ignore))
                     continue;
+                // Anything with a name is already listed, at a better distance than the
+                // ray happened to strike.
+                if (Landmarks.TryName(hit.transform, out string _, out int _)) continue;
                 if (!IsLikelyBuilding(origin, dir, hit)) continue;
 
-                angles.Add(angle);
-                distances.Add(hit.distance);
-                hits.Add(hit.transform);
+                candidates.Add(new Candidate("building", hit.distance, angle));
             }
 
-            var found = new List<string>();
-            for (int reported = 0; reported < SurveyMaxBuildings; reported++)
+            candidates.Sort((a, b) => a.Distance.CompareTo(b.Distance));
+
+            var found = new List<Candidate>();
+            for (int i = 0; i < candidates.Count && found.Count < SurveyMaxBuildings; i++)
             {
-                int nearest = -1;
-                for (int i = 0; i < angles.Count; i++)
-                    if (nearest < 0 || distances[i] < distances[nearest]) nearest = i;
-                if (nearest < 0) break;
-
-                float bearing = angles[nearest];
-                string what = Landmarks.NameOr(hits[nearest], "building");
-                found.Add($"{what} {DirectionFromAngle(bearing)} {Mathf.RoundToInt(distances[nearest])} meters");
-
-                // Drop every ray that plausibly belongs to the same structure.
-                for (int i = angles.Count - 1; i >= 0; i--)
-                {
-                    if (Mathf.Abs(Mathf.DeltaAngle(angles[i], bearing)) > SurveyMergeArc) continue;
-                    angles.RemoveAt(i);
-                    distances.RemoveAt(i);
-                    hits.RemoveAt(i);
-                }
+                // One structure claims a wide arc, so the several rays that crossed a
+                // warehouse don't become three warehouses. Only its own name is claimed:
+                // a house in front of the church must not silence the church.
+                if (AlreadyClaimed(found, candidates[i])) continue;
+                found.Add(candidates[i]);
             }
 
             if (found.Count == 0)
                 return $"Outdoors. No buildings within {(int)BuildingMaxDistance} meters";
 
             var parts = new List<string> { "Outdoors" };
-            parts.AddRange(found);
+            for (int i = 0; i < found.Count; i++)
+            {
+                int metres = Mathf.RoundToInt(found[i].Distance);
+                // Pressed against its wall: "house here" beats "house ahead 0 meters".
+                parts.Add(metres <= StandingInside
+                    ? $"{found[i].Name} here"
+                    : $"{found[i].Name} {DirectionFromAngle(found[i].Bearing)} {metres} meters");
+            }
+
             return string.Join(". ", parts.ToArray());
+        }
+
+        /// <summary>One thing the survey could mention, from the landmark query or the sweep.</summary>
+        private struct Candidate
+        {
+            public readonly string Name;
+            public readonly float Distance;
+            public readonly float Bearing; // degrees from where the player faces
+
+            public Candidate(string name, float distance, float bearing)
+            {
+                Name = name;
+                Distance = distance;
+                Bearing = bearing;
+            }
+        }
+
+        private static bool AlreadyClaimed(List<Candidate> reported, Candidate candidate)
+        {
+            for (int i = 0; i < reported.Count; i++)
+            {
+                if (reported[i].Name != candidate.Name) continue;
+                if (Mathf.Abs(Mathf.DeltaAngle(reported[i].Bearing, candidate.Bearing)) <= SurveyMergeArc)
+                    return true;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Names the closest landmarks in the player's own terms, skipping repeats so
+        /// three houses on one street don't use up the whole sentence.
+        /// </summary>
+        private static List<string> NameLandmarks(CharacterMultiplayer player,
+            List<Landmarks.Nearby> nearby, int max)
+        {
+            var said = new List<string>();
+            var names = new List<string>();
+
+            for (int i = 0; i < nearby.Count && said.Count < max; i++)
+            {
+                if (names.Contains(nearby[i].Name)) continue;
+                names.Add(nearby[i].Name);
+
+                int metres = Mathf.RoundToInt(nearby[i].Distance);
+                if (metres <= StandingInside)
+                {
+                    said.Add(nearby[i].Name);
+                    continue;
+                }
+
+                said.Add($"{nearby[i].Name} " +
+                         $"{GetRelativeDirection(player.transform, nearby[i].Position)} {metres} meters");
+            }
+
+            return said;
         }
 
         private static string GetRelativeDirection(Transform playerTransform, Vector3 targetPos)
         {
+            return DirectionFromAngle(BearingTo(playerTransform, targetPos));
+        }
+
+        /// <summary>Degrees from where the player faces, ignoring height.</summary>
+        private static float BearingTo(Transform playerTransform, Vector3 targetPos)
+        {
             Vector3 toTarget = targetPos - playerTransform.position;
             toTarget.y = 0;
 
-            float angle = Vector3.SignedAngle(playerTransform.forward, toTarget, Vector3.up);
-            return DirectionFromAngle(angle);
+            // Standing in the doorway of the thing you asked about: call it straight ahead
+            // rather than letting SignedAngle guess off a zero-length vector.
+            if (toTarget.sqrMagnitude < 0.01f) return 0f;
+
+            return Vector3.SignedAngle(playerTransform.forward, toTarget, Vector3.up);
         }
 
         /// <summary>First letter up, for a landmark name that has to start a sentence.</summary>
