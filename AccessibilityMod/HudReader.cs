@@ -392,14 +392,24 @@ namespace AccessibilityMod
                 int healthPct = player.health * 100 / 255;
                 string summary = $"Health {healthPct} percent";
 
-                // Armor check
+                // Armour. These slots are null until something is found, and reading
+                // .id off them threw every time the player was unarmoured - which is
+                // most of a match, and exactly when the rest of this summary matters.
                 var charInv = player.GetComponent<CharacterInventory>();
                 if (charInv != null)
                 {
-                    if (charInv.vest.id > 0)
-                        summary += ", vest equipped";
-                    if (charInv.helmet.id > 0)
-                        summary += ", helmet equipped";
+                    summary += charInv.vest != null
+                        ? $", vest level {charInv.vest.level}" : ", no vest";
+                    summary += charInv.helmet != null
+                        ? $", helmet level {charInv.helmet.level}" : ", no helmet";
+
+                    // What the armour is worth, since the HUD's own durability
+                    // numbers are not what the damage math reads.
+                    if (ArmorPatches.IsActive)
+                    {
+                        int pct = Mathf.RoundToInt(ArmorPatches.ReductionFor(player) * 100f);
+                        if (pct > 0) summary += $", armour {pct} percent";
+                    }
                 }
 
                 summary += $", {player.kills} kills";
