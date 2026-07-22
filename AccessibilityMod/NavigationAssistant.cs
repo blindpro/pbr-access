@@ -662,22 +662,22 @@ namespace AccessibilityMod
         }
 
         /// <summary>
-        /// What building the player is standing in, or null if nothing named is close
-        /// enough to be the one around them. Inside a church every wall and pillar is a
-        /// collider a few metres off, so the nearest landmark is the right answer.
+        /// What building is around the player when something is overhead but no footprint
+        /// claimed them - a porch, an archway, a doorway half-crossed. Solid objects are
+        /// no answer to "what am I inside of", so a water tower standing over you leaves
+        /// this null and the callout falls back to a plain "indoors".
         /// </summary>
         private static string BuildingHere(CharacterMultiplayer player)
         {
             var nearby = Landmarks.FindNearby(player.transform.position, ThresholdSearchRadius);
 
             for (int i = 0; i < nearby.Count; i++)
-                if (nearby[i].Bounds.Contains(player.transform.position))
+            {
+                if (!nearby[i].Enterable) continue;
+                if (nearby[i].Distance <= StandingInside
+                    || nearby[i].Bounds.Contains(player.transform.position))
                     return nearby[i].Name;
-
-            // Not inside any footprint - a porch, an archway, a doorway half-crossed.
-            // The nearest is still the building it belongs to, if it is within touching
-            // distance.
-            if (nearby.Count > 0 && nearby[0].Distance <= StandingInside) return nearby[0].Name;
+            }
 
             return null;
         }
@@ -853,6 +853,14 @@ namespace AccessibilityMod
             for (int i = 0; i < reported.Count; i++)
             {
                 if (reported[i].Name != candidate.Name) continue;
+
+                // "Here" carries no direction, so a second one of the same name adds
+                // nothing however far apart their bearings are. Standing between two
+                // industrial buildings used to report the pair of them, twice, as
+                // "industrial building here. industrial building here".
+                if (reported[i].Distance <= StandingInside && candidate.Distance <= StandingInside)
+                    return true;
+
                 if (Mathf.Abs(Mathf.DeltaAngle(reported[i].Bearing, candidate.Bearing)) <= SurveyMergeArc)
                     return true;
             }

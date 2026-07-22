@@ -232,6 +232,11 @@ namespace AccessibilityMod
         {
             inside = Vector3.zero;
 
+            // A water tank has no way in to find. Asking the navmesh would usually work
+            // this out on its own, but saying so up front is cheaper and means the guide
+            // never picks one on a day the sampler is feeling generous.
+            if (!building.Enterable) return false;
+
             // The floor, not the roof: the centre of a box that includes the roof can sit
             // in mid-air.
             Vector3 middle = building.Bounds.center;

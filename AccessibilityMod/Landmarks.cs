@@ -46,6 +46,9 @@ namespace AccessibilityMod
             public int Rank;
             public float Distance;
 
+            /// <summary>Somewhere you can be inside of, rather than a solid object.</summary>
+            public bool Enterable;
+
             /// <summary>Nearest point on the building: what to walk towards.</summary>
             public Vector3 Position;
 
@@ -113,7 +116,8 @@ namespace AccessibilityMod
                     Rank = rank,
                     Distance = distance,
                     Position = closest,
-                    Bounds = hit.bounds
+                    Bounds = hit.bounds,
+                    Enterable = Known[rank].Enterable
                 });
             }
 
@@ -124,6 +128,11 @@ namespace AccessibilityMod
         /// <summary>
         /// The building this point is standing inside, if any. Nearest first, so a porch
         /// that falls inside two footprints answers with the one you are actually in.
+        ///
+        /// Solid objects are skipped, however squarely you are standing in their box. A
+        /// water tank has no inside to be in, so "entered the water tank" was never true -
+        /// you were beside it, in the slack an axis-aligned box leaves around a round
+        /// thing.
         /// </summary>
         public static bool TryFindContaining(Vector3 point, float radius, out Nearby building)
         {
@@ -131,6 +140,7 @@ namespace AccessibilityMod
 
             for (int i = 0; i < nearby.Count; i++)
             {
+                if (!nearby[i].Enterable) continue;
                 if (!IsInside(nearby[i].Bounds, point)) continue;
 
                 building = nearby[i];
@@ -221,10 +231,17 @@ namespace AccessibilityMod
             public readonly string Token;
             public readonly string Spoken;
 
-            public Landmark(string token, string spoken)
+            /// <summary>
+            /// Whether this is somewhere you can be inside of. A water tank is a solid
+            /// object: worth calling out as a landmark, never worth saying you entered.
+            /// </summary>
+            public readonly bool Enterable;
+
+            public Landmark(string token, string spoken, bool enterable = true)
             {
                 Token = token;
                 Spoken = spoken;
+                Enterable = enterable;
             }
         }
 
@@ -235,28 +252,28 @@ namespace AccessibilityMod
         /// </summary>
         private static readonly Landmark[] Known =
         {
-            new Landmark("Lighthouse", "lighthouse"),
+            new Landmark("Lighthouse", "lighthouse", enterable: false),
             new Landmark("Church", "church"),
-            new Landmark("RadioTower", "radio tower"),
-            new Landmark("Cooling_Tower", "cooling tower"),
-            new Landmark("SmokeStack", "smokestack"),
-            new Landmark("WaterTower", "water tower"),
-            new Landmark("Crane", "crane"),
-            new Landmark("HeliPad", "helipad"),
+            new Landmark("RadioTower", "radio tower", enterable: false),
+            new Landmark("Cooling_Tower", "cooling tower", enterable: false),
+            new Landmark("SmokeStack", "smokestack", enterable: false),
+            new Landmark("WaterTower", "water tower", enterable: false),
+            new Landmark("Crane", "crane", enterable: false),
+            new Landmark("HeliPad", "helipad", enterable: false),
             new Landmark("Bunker_Entrance", "bunker"),
-            new Landmark("ContainerBridge", "container bridge"),
+            new Landmark("ContainerBridge", "container bridge", enterable: false),
             new Landmark("Diner", "diner"),
             new Landmark("Motel", "motel"),
             new Landmark("Cafe", "cafe"),
             new Landmark("AutoRepair", "auto repair shop"),
-            new Landmark("Pool", "swimming pool"),
+            new Landmark("Pool", "swimming pool", enterable: false),
             new Landmark("Quarantine", "quarantine tent"),
             new Landmark("Military_Tent", "military tent"),
-            new Landmark("WaterTank", "water tank"),
+            new Landmark("WaterTank", "water tank", enterable: false),
             new Landmark("Market_Large", "big market"),
             new Landmark("Market", "market"),
             new Landmark("Warehouse", "warehouse"),
-            new Landmark("HighRise", "high rise"),
+            new Landmark("HighRise", "high rise", enterable: false),
             new Landmark("Industrial", "industrial building"),
             new Landmark("Commercial", "commercial building"),
             new Landmark("Shop", "shop"),
