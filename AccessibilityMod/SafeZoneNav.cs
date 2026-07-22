@@ -5,8 +5,9 @@ namespace AccessibilityMod
 {
     /// <summary>
     /// Guides the player toward the safe zone with spoken directional callouts.
-    /// - N key: on-demand safe zone report (direction, distance, status)
+    /// - N key: on-demand safe zone report (direction, distance, status, next circle)
     /// - Auto-announces when entering or leaving the safe zone
+    /// - Auto-announces where the next circle lands as soon as the game picks it
     /// - Periodic direction reminders when outside the zone while it shrinks
     /// </summary>
     public class SafeZoneNav
@@ -20,6 +21,14 @@ namespace AccessibilityMod
         private const float OnDemandCooldown = 1f;
         private float _onDemandCooldownTimer;
 
+        // The next circle only counts as news once it stops matching the one we're
+        // standing in: the game's first circle is the full default one, so target and
+        // current start out identical.
+        private const float NextCircleSameTolerance = 5f;
+        private Vector3 _announcedNextCenter;
+        private float _announcedNextRadius;
+        private bool _nextCircleAnnounced;
+
         public void Tick()
         {
             var player = CharacterMultiplayer.GetMainPlayer();
@@ -31,6 +40,7 @@ namespace AccessibilityMod
                     _zoneStateSet = false;
                     _outsideTimer = 0f;
                     _onDemandCooldownTimer = 0f;
+                    _nextCircleAnnounced = false;
                 }
                 return;
             }
@@ -66,7 +76,12 @@ namespace AccessibilityMod
                 return;
             }
 
-            ScreenReaderManager.Speak(DescribeZone(player, capsule));
+            string report = DescribeZone(player, capsule);
+            string next = DescribeNextCircle(player, zoneMgr, capsule);
+            if (next != null)
+                report += ". " + next;
+
+            ScreenReaderManager.Speak(report);
         }
 
         private void MonitorZoneStatus(CharacterMultiplayer player)
@@ -76,6 +91,8 @@ namespace AccessibilityMod
 
             var capsule = GetActiveCapsule(zoneMgr);
             if (capsule == null) return;
+
+            CheckNextCircle(player, zoneMgr, capsule);
 
             bool inside = IsInside(player, capsule);
 
@@ -124,6 +141,86 @@ namespace AccessibilityMod
             if (distToEdge <= 5)
                 return $"Safe zone {direction}, just ahead";
             return $"Safe zone {direction}, {distToEdge} meters";
+        }
+
+        /// <summary>
+        /// Speaks the next circle once the game commits to one, so the player can start
+        /// rotating while it is still only a target instead of after the shrink catches
+        /// them. This is the one thing sighted players read off the map that we weren't
+        /// saying.
+        /// </summary>
+        private void CheckNextCircle(CharacterMultiplayer player, DamageZoneManager zoneMgr, CapsuleCollider current)
+        {
+            if (!TryGetNextCircle(zoneMgr, current, out Vector3 center, out float radius))
+            {
+                // The shrink has caught up with its target, so the circle after this one
+                // is news again when the game picks it.
+                _nextCircleAnnounced = false;
+                return;
+            }
+
+            if (_nextCircleAnnounced
+                && Vector3.Distance(_announcedNextCenter, center) <= NextCircleSameTolerance
+                && Mathf.Abs(_announcedNextRadius - radius) <= NextCircleSameTolerance)
+                return;
+
+            _announcedNextCenter = center;
+            _announcedNextRadius = radius;
+            _nextCircleAnnounced = true;
+
+            string report = DescribeNextCircle(player, zoneMgr, current);
+            if (report == null) return;
+
+            // interrupt: false so close-range wall and enemy callouts win.
+            ScreenReaderManager.Speak(report, false);
+        }
+
+        /// <summary>
+        /// The sentence both the N key and the auto-announce speak for the circle the
+        /// zone is heading to, or null while there isn't one worth mentioning.
+        /// </summary>
+        private static string DescribeNextCircle(CharacterMultiplayer player, DamageZoneManager zoneMgr, CapsuleCollider current)
+        {
+            if (!TryGetNextCircle(zoneMgr, current, out Vector3 center, out float radius))
+                return null;
+
+            Vector3 playerPos = player.transform.position;
+            center.y = playerPos.y;
+
+            float distToCenter = Vector3.Distance(playerPos, center);
+            if (distToCenter <= radius)
+            {
+                int toEdge = Mathf.RoundToInt(radius - distToCenter);
+                if (toEdge <= 5)
+                    return "Next circle: you're right on its edge";
+                return $"Next circle: you're already inside, {toEdge} meters from its edge";
+            }
+
+            int distToEdge = Mathf.RoundToInt(distToCenter - radius);
+            string direction = GetRelativeDirection(player.transform, center);
+            return $"Next circle {direction}, {distToEdge} meters";
+        }
+
+        /// <summary>
+        /// The circle DamageZoneManager is shrinking toward. Reported only once it differs
+        /// from the circle we're standing in: the game's first circle is the full default
+        /// one (RPC_UpdateDamageZone skips ReduceTargetZoneCircle when isFirstTime), so
+        /// target and current start out identical and there is nothing to say yet.
+        /// </summary>
+        private static bool TryGetNextCircle(DamageZoneManager zoneMgr, CapsuleCollider current, out Vector3 center, out float radius)
+        {
+            center = Vector3.zero;
+            radius = 0f;
+
+            var target = zoneMgr.target_damageZone;
+            if (target == null || !target.gameObject.activeSelf) return false;
+
+            center = zoneMgr.GetTargetDamageZonePos();
+            radius = zoneMgr.GetTargetDamageZoneRadius();
+
+            Vector3 currentCenter = FlatCenter(current, center.y);
+            return Vector3.Distance(currentCenter, center) > NextCircleSameTolerance
+                || Mathf.Abs(GetRadius(current) - radius) > NextCircleSameTolerance;
         }
 
         /// <summary>
