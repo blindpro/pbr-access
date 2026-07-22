@@ -11,9 +11,10 @@ are menu/lobby).
 
 You guessed right: **there are no Fortnite-style named POIs in the battle royale map.**
 The engine has the machinery for them and the map does not use it. But there is plenty
-else to work with — a fixed-shape flight path with a knowable heading, ~4,300 individually
-addressable loot boxes, and an explicit list of the points every bot lands on. That last
-one is a literal hot-drop oracle.
+else to work with: a fixed-shape flight path with a knowable heading, and buildings whose
+prefab names are readable enough to speak. Two other things the game knows — per-square
+loot counts (§3) and where every bot will land (§4) — are reachable and deliberately left
+alone, because a sighted player doesn't get them either.
 
 ---
 
@@ -129,39 +130,21 @@ what is in front of the player, not what is over the hill.
 
 ---
 
-## 4. Bot landing points — the actual hot-drop oracle
+## 4. Bot landing points — ruled out, do not build this
 
-This is the strongest finding, and it needs the same fairness call the loot counts got
-(§3) before any of it is built. A sighted player sees chutes in the sky and can guess
-where a few of them are heading; reading every bot's exact landing coordinate out of
-memory is a different thing. "Enemies are dropping to your left" is probably parity.
-"Four enemies landing at the warehouse, 300 metres left" probably isn't.
+The game knows exactly where every bot will land, and that knowledge is reachable.
+**It is not going in the mod.** Recorded here only so the next person to find it knows the
+call has already been made.
 
-`AirplaneManager.Start` collects every `NavmeshPoint` in the scene (parent object in the
-scene is named `SafeBotsLandPoints`) into the public array
-`AirplaneManager.safeBotsLandPoints`. Each point is snapped to the navmesh and then
-disabled, so it must be found with `includeInactive: true` — or just read the array.
+`AirplaneManager` holds a list of bot landing spots, and each bot commits to one of them
+while you are still falling. A sighted player sees chutes in the sky and can guess roughly
+where a few of them are heading — nobody gets a precise roster of where every enemy will
+touch down. Reading one out of memory is not closing a gap, it is opening one, the same
+way loot counts were (§3).
 
-`CharacterParachute` then, for the local main player, copies that array into the static
-`botTargetsList`. Each bot, 5–60 s after jump becomes available (`BotJump`), pulls **one
-random target out of the list and removes it**, stores it in its private `botTarget`, and
-flies straight at it at 10 m/s until it is within 1 m.
-
-Two things follow:
-
-- **Before anyone commits**, `safeBotsLandPoints` tells us the complete set of places any
-  bot could land. Landing far from that set is a guaranteed quiet drop; landing in a dense
-  part of it is the hot drop.
-- **After the bots pick** (which happens while you are still falling), each bot's exact
-  landing coordinate is knowable — `CharacterParachute.botTarget` is private but the host
-  simulates all bots (`isBot && isLocal`), so one reflection `FieldInfo` read per bot gives
-  live, exact answers: *"Four enemies landing at the warehouse, 300 metres left."*
-  This works on the master client, which covers offline/solo-vs-bots — the mode
-  `OfflineModeFix` already supports.
-
-Caveat to verify in game: in a real Photon lobby with human players, only the master
-client owns the bots, so the reflection read may return null for a non-host. The
-`safeBotsLandPoints` set itself is available to everyone regardless.
+The deliberately vague version — "chutes to your left" from the same on-screen information
+a sighted player has — would be parity, and is the only shape of this worth revisiting.
+Exact coordinates, counts, or named destinations are not.
 
 ---
 
@@ -201,22 +184,17 @@ Two usable facts for drop advice:
 ## 6. Concrete proposals, ranked by value per line of code
 
 1. ~~**Next-circle callout in `SafeZoneNav`.**~~ Done — `SafeZoneNav.CheckNextCircle`.
-2. **Bot-landing warning during descent.** Reflect `CharacterParachute.botTarget` over
-   `CharacterMultiplayer.characters` where `isBot`; cluster and speak the two biggest
-   clusters with direction/distance relative to the player's fall. **Blocked on the
-   fairness call in §4** — a vague "enemies dropping left" may be parity, exact
-   coordinates are not.
-3. **Landmark drop picker on the plane.** Name candidate landing spots from nearby
+2. **Landmark drop picker on the plane.** Name candidate landing spots from nearby
    `SM_Bld_*` renderer names and expose them as a cyclable list while `isOnAirplane`,
    with "jump now" timing against the flight line. Named places only — no box counts,
    per §3.
-4. **Flight-path announcement at match start.** Read `airplaneRotation.eulerAngles.y`,
+3. **Flight-path announcement at match start.** Read `airplaneRotation.eulerAngles.y`,
    `Airplane.transform.position/forward`, `targetPos`, `speed`. One sentence, tells the
    player which half of the map they are being offered.
-5. ~~**Grid coordinates everywhere.**~~ Done — `MapGrid`, on the M key and auto-announced
+4. ~~**Grid coordinates everywhere.**~~ Done — `MapGrid`, on the M key and auto-announced
    on crossing a square. Extents come from `GameManager.bigMapCamera`, which turned out
    to be a better source than `Minimap` (see Not verified).
-6. ~~**Landmark naming from prefab names.**~~ Done for the grid readout (`MapGrid.Landmarks`).
+5. ~~**Landmark naming from prefab names.**~~ Done for the grid readout (`MapGrid.Landmarks`).
    Still worth feeding into the `B`-key survey in `NavigationAssistant`, which says
    "building ahead" where it could say "church ahead".
 
@@ -224,20 +202,20 @@ Two usable facts for drop advice:
 
 | What | Where |
 |---|---|
-| Airplane, route, speed, bot land points | `GameManager.Instance.GetComponent<AirplaneManager>()` — also reachable via `MatchmakingManager.Instance.GetComponent<AirplaneManager>()`; both are used in game code |
+| Airplane, route, speed | `GameManager.Instance.GetComponent<AirplaneManager>()` — also reachable via `MatchmakingManager.Instance.GetComponent<AirplaneManager>()`; both are used in game code |
 | Player parachute state | `player.GetComponent<CharacterParachute>()` — `isOnAirplane`, `isParachuting`, `isParachuteOpen`, `canJumpFromPlane`, `canOpenParachute` |
-| All loot boxes | `GameManager.Instance.GetComponent<PickupsManager>().ammoBoxes` / `.ammoBoxesAchievable` |
+| Loot boxes (close-range help only, per §3) | `GameManager.Instance.GetComponent<PickupsManager>().ammoBoxes` / `.ammoBoxesAchievable` |
 | Zone, current and next | `GameManager.Instance.GetComponent<DamageZoneManager>()` — `damageZone`, `GetTargetDamageZonePos()`, `GetTargetDamageZoneRadius()`, `IsShrinking()` |
-| Map extents | `Object.FindObjectOfType<Minimap>()` — `minimapOrigin`, `mapSize` |
+| Map extents | `GameManager.Instance.bigMapCamera` — world `transform.position` + `orthographicSize`. What `MapGrid` uses; it is the camera the game renders its own full-screen map with, so squares line up with what a sighted player reads |
 | Glide tuning | `Movement` — `flyControlMultiplierMinMax`, `flyGravity`, `parachuteGravity`, `speedRunning` (private/serialized; reflection or just hardcode the observed 1–3x, 2.0, 1.0, 6.8) |
 
 ## Not verified
 
-- Whether `Minimap`/`minimapOrigin` actually exists in the BR scene (the class ships with
-  the environment kit; the BR HUD uses `MiniMapCameraFollow` + a top-down camera instead,
-  which suggests it may not). If absent, derive map extents from the `damageZoneDefault`
-  circle instead — it is guaranteed present and covers the playable area.
-- Whether bot `botTarget` reflection returns anything on a non-host client in an online
-  match.
+- Whether `bigMapCamera.orthographicSize` really frames the play area, and whether the
+  map is square. `MapGrid` assumes both and falls back to the `damageZoneDefault` circle
+  if the camera is unusable. If the map plane turns out non-square, columns will be
+  stretched relative to rows and the grid needs a separate x extent.
+- Whether the landmark names come out distinctive or repetitive in practice — if most of
+  the map is generic `Commercial_*` boxes, `MapGrid.Landmarks` wants pruning.
 - Exact plane altitude and `speed`, which set the real glide radius — read them in game
   rather than assuming.
