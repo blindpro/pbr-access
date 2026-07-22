@@ -22,3 +22,5 @@ Desktop.ini
 .idea/
 *.sln.DotSettings.user
 *.claude/
+## Generated release payload (rebuilt by deploy.bat)
+release/
