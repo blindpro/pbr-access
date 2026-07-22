@@ -404,6 +404,7 @@ cursor, and it must not come up behind the accessible one.
 | E | Loot list — Up/Down, Enter takes, Left/Escape closes |
 | H | Health · Z ammo (+ fitted sight) · K kills & players · L full status · J height |
 | F | Compass facing · B surroundings survey · N safe zone · T lock diagnostics |
+| **M** | Map square, loot count and nearest landmark — e.g. "D2. 14 loot boxes in this square. Church 40 meters north east" *(new)* |
 
 ---
 

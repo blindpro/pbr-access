@@ -15,6 +15,7 @@ namespace AccessibilityMod
         private InventoryMenu _inventoryMenu;
         private HealSlot _healSlot;
         private SafeZoneNav _safeZoneNav;
+        private MapGrid _mapGrid;
         private LockDiagnostics _lockDiagnostics;
         private bool _hasSpokenReady;
 
@@ -30,6 +31,7 @@ namespace AccessibilityMod
             _inventoryMenu = new InventoryMenu();
             _healSlot = new HealSlot();
             _safeZoneNav = new SafeZoneNav();
+            _mapGrid = new MapGrid();
             _lockDiagnostics = new LockDiagnostics();
         }
 
@@ -57,6 +59,7 @@ namespace AccessibilityMod
                 _aimAssist.Tick();
                 _audioTargeting.Tick();
                 _safeZoneNav.Tick();
+                _mapGrid.Tick();
                 _lockDiagnostics.Tick();
                 HitAnnouncer.Tick();
             }
