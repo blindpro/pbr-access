@@ -48,9 +48,10 @@ honest ways to do that, both cheap:
    A `Physics.OverlapSphere` + renderer-name lookup around a candidate point gives
    "you are aiming at a church and two houses". `NavigationAssistant.AnnounceSurroundings`
    already does the raycast-sweep half of this; it just does not name what it hits.
-2. **Cluster the loot boxes** (see §3) and name each cluster by its biggest nearby
-   building. That yields stable, deserved names like "the big warehouse cluster" without
-   hand-authoring anything.
+2. **Cluster the buildings themselves** and name each cluster by its most distinctive
+   member. That yields stable, deserved names like "the warehouse district" without
+   hand-authoring anything. (Loot positions would cluster more cleanly, but see the
+   fairness note in §3 — box counts stay out of callouts.)
 
 Grid coordinates are the fallback and are trivially available: `Minimap.minimapOrigin`
 plus `mapSize` (2100 x 2100) gives a normalised 0–1 position, so an A1–J10 style callout
@@ -96,13 +97,13 @@ altitude.** Given the plane's altitude we can compute and speak an actual reacha
 radius, and say whether a chosen landmark is still in range.
 
 **What this makes possible:** a pre-jump menu. Hold a key on the plane, cycle candidate
-landing spots (loot clusters / landmarks), hear "warehouse cluster, 340 metres right of
-the flight path, 11 boxes, reachable" — and get told when the plane is at the right
-moment to jump for it. All the inputs are readable at runtime.
+landing spots by landmark, hear "church, 340 metres right of the flight path, reachable"
+— and get told when the plane is at the right moment to jump for it. All the inputs are
+readable at runtime.
 
 ---
 
-## 3. Loot density is fully knowable, per-box, before anyone lands
+## 3. Loot density is fully knowable — and deliberately not spoken
 
 `LootPoint.cs` spawns exactly one `AmmoBox` per loot point at `Start`. Every box registers
 itself into `PickupsManager.ammoBoxes`, and boxes flagged `achievable` also land in
@@ -114,23 +115,27 @@ Scene counts from `level2`: **4,350 `AmmoBoxParent` objects**, from 53 distinct
 scenery — identical every match. Contents are randomised per box (`AmmoBox.random_items`),
 but *where* the boxes are never changes.
 
-So we can, at any time including while still on the plane:
+**Ruled out on fairness grounds.** All of the above is knowable, and speaking it was
+tried and removed. A sighted player cannot see how much loot sits in a square either —
+they learn it by playing. Handing a blind player a box count is not closing a gap, it is
+opening one in the other direction, and the point of this mod is parity. Loot density
+stays out of every callout: the map grid names places, and the player learns which ones
+are worth dropping the same way everyone else does.
 
-- Grid the map into cells and rank them by box count → "hot" and "cold" areas, computed
-  once at match start.
-- Speak a candidate drop as "23 boxes within 60 metres" — a real loot-density readout no
-  sighted player gets.
-- Because it is deterministic across matches, the same names and rankings hold game to
-  game, so the player can learn the map.
-
-`NavigationAssistant` already scans `ammoBoxes` at 7 m for the proximity beep; this is the
-same data used at map scale.
+The per-box data is still the right source for *close-range* help, which is where the gap
+is real: `NavigationAssistant` already uses `ammoBoxes` for the 7 m proximity beep, which
+substitutes for seeing a box on the floor in front of you. That is the line — describing
+what is in front of the player, not what is over the hill.
 
 ---
 
 ## 4. Bot landing points — the actual hot-drop oracle
 
-This is the strongest finding.
+This is the strongest finding, and it needs the same fairness call the loot counts got
+(§3) before any of it is built. A sighted player sees chutes in the sky and can guess
+where a few of them are heading; reading every bot's exact landing coordinate out of
+memory is a different thing. "Enemies are dropping to your left" is probably parity.
+"Four enemies landing at the warehouse, 300 metres left" probably isn't.
 
 `AirplaneManager.Start` collects every `NavmeshPoint` in the scene (parent object in the
 scene is named `SafeBotsLandPoints`) into the public array
@@ -195,22 +200,25 @@ Two usable facts for drop advice:
 
 ## 6. Concrete proposals, ranked by value per line of code
 
-1. **Next-circle callout in `SafeZoneNav`.** Public API, no reflection, ~20 lines. Speak
-   direction + distance to `GetTargetDamageZonePos()` during the shrink-in window.
+1. ~~**Next-circle callout in `SafeZoneNav`.**~~ Done — `SafeZoneNav.CheckNextCircle`.
 2. **Bot-landing warning during descent.** Reflect `CharacterParachute.botTarget` over
    `CharacterMultiplayer.characters` where `isBot`; cluster and speak the two biggest
-   clusters with direction/distance relative to the player's fall. Turns the drop from
-   blind luck into a decision.
-3. **Loot-density drop picker on the plane.** Grid `PickupsManager.ammoBoxes` at match
-   start, name each hot cell from nearby `SM_Bld_*` renderer names, expose as a cyclable
-   list while `isOnAirplane` with "jump now" timing against the flight line.
+   clusters with direction/distance relative to the player's fall. **Blocked on the
+   fairness call in §4** — a vague "enemies dropping left" may be parity, exact
+   coordinates are not.
+3. **Landmark drop picker on the plane.** Name candidate landing spots from nearby
+   `SM_Bld_*` renderer names and expose them as a cyclable list while `isOnAirplane`,
+   with "jump now" timing against the flight line. Named places only — no box counts,
+   per §3.
 4. **Flight-path announcement at match start.** Read `airplaneRotation.eulerAngles.y`,
    `Airplane.transform.position/forward`, `targetPos`, `speed`. One sentence, tells the
    player which half of the map they are being offered.
-5. **Grid coordinates everywhere.** `Minimap.minimapOrigin` + 2100x2100 → "F7". Cheap,
-   and it makes every other callout learnable across matches.
-6. **Landmark naming from prefab names.** Feeds 3 and improves the existing `B`-key
-   survey in `NavigationAssistant` from "building ahead" to "church ahead".
+5. ~~**Grid coordinates everywhere.**~~ Done — `MapGrid`, on the M key and auto-announced
+   on crossing a square. Extents come from `GameManager.bigMapCamera`, which turned out
+   to be a better source than `Minimap` (see Not verified).
+6. ~~**Landmark naming from prefab names.**~~ Done for the grid readout (`MapGrid.Landmarks`).
+   Still worth feeding into the `B`-key survey in `NavigationAssistant`, which says
+   "building ahead" where it could say "church ahead".
 
 ## Runtime handles worth remembering
 

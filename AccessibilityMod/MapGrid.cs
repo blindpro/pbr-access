@@ -5,13 +5,17 @@ namespace AccessibilityMod
 {
     /// <summary>
     /// Gives the map spoken coordinates so it can be learned and talked about.
-    /// - M key: current cell, the loot in it, and the nearest landmark
+    /// - M key: current cell and the nearest landmark
     /// - Auto-announces the cell as you cross into it
     ///
     /// The map has no authored place names (no NewLocationTrigger survives in the
     /// battle royale scene), so cells come from the same rectangle the game's own big
     /// map camera frames, and landmark names are read off the Synty prefab names of
     /// whatever is standing nearby. See map.md.
+    ///
+    /// Deliberately says nothing about loot. A square's box count is knowable and
+    /// fixed, but a sighted player can't see it either, so speaking it would hand out
+    /// an advantage rather than close a gap.
     /// </summary>
     public class MapGrid
     {
@@ -93,10 +97,6 @@ namespace AccessibilityMod
             }
 
             string report = cell;
-
-            int loot = CountLootInCell(cell);
-            if (loot > 0)
-                report += $". {loot} loot {(loot == 1 ? "box" : "boxes")} in this square";
 
             string landmark = DescribeNearestLandmark(focus, withDistance: true);
             if (landmark != null)
@@ -200,37 +200,6 @@ namespace AccessibilityMod
             }
 
             return false;
-        }
-
-        // ---------------------------------------------------------------- loot
-
-        /// <summary>
-        /// Loot positions are scenery: every LootPoint spawns one box at a fixed spot and
-        /// they never move, so a square's count is the same every match. That is what
-        /// makes a square worth learning.
-        /// </summary>
-        private int CountLootInCell(string cell)
-        {
-            if (GameManager.Instance == null) return 0;
-            var pickups = GameManager.Instance.GetComponent<PickupsManager>();
-            if (pickups == null) return 0;
-
-            // Prefer the reachable ones; fall back to every box if the game hasn't
-            // flagged any.
-            var boxes = pickups.ammoBoxesAchievable != null && pickups.ammoBoxesAchievable.Count > 0
-                ? pickups.ammoBoxesAchievable
-                : pickups.ammoBoxes;
-            if (boxes == null) return 0;
-
-            int count = 0;
-            for (int i = 0; i < boxes.Count; i++)
-            {
-                var box = boxes[i];
-                if (box == null) continue;
-                if (GetCell(box.transform.position) == cell) count++;
-            }
-
-            return count;
         }
 
         // ----------------------------------------------------------- landmarks
