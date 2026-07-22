@@ -84,7 +84,15 @@ namespace AccessibilityMod
         public void Tick()
         {
             var player = CharacterMultiplayer.GetMainPlayer();
-            if (player == null || player.IsDead()) return;
+            if (player == null) return;
+
+            // Forgetting the drawn weapon on death is what lets the next spawn
+            // announce the pistol again.
+            if (player.IsDead())
+            {
+                _lastWeaponName = null;
+                return;
+            }
 
             // Only run during gameplay
             if (MatchmakingManager.Instance == null) return;
@@ -583,26 +591,21 @@ namespace AccessibilityMod
             var charInv = player.GetComponent<CharacterInventory>();
             if (charInv == null) return;
 
-            // Use CharacterInventory to get the actual weapon the player picked up
-            // Skip the default "Handgun 01" that the game always assigns
-            bool hasRealWeapon = charInv.weapon1 != null && charInv.weapon1.name != "Handgun 01";
-            bool hasWeapon2 = charInv.weapon2 != null;
-            if (!hasRealWeapon && !hasWeapon2) return;
-
+            // The spawn pistol used to be skipped here as if it were a placeholder,
+            // so a player who had not found a gun yet was never told they were
+            // holding one. It is a loaded weapon and it is what they will fight with
+            // until they find better.
             int slot = charInv.GetCurrentWeapon();
             var invItem = slot == 0 ? charInv.weapon1 : charInv.weapon2;
             if (invItem == null) return;
 
-            string weaponName = !string.IsNullOrEmpty(invItem.short_description)
-                ? invItem.short_description : invItem.name;
+            string weaponName = ItemText.Name(invItem);
+            if (weaponName == _lastWeaponName) return;
 
-            if (weaponName != _lastWeaponName)
-            {
-                if (_lastWeaponName != null)
-                    ScreenReaderManager.Speak(weaponName);
-
-                _lastWeaponName = weaponName;
-            }
+            // Announced on the first draw too - landing with a pistol in hand is
+            // worth knowing, and it is the moment the player can first use it.
+            ScreenReaderManager.Speak(_lastWeaponName == null ? $"{weaponName} ready" : weaponName);
+            _lastWeaponName = weaponName;
         }
 
         private void CheckIndoorOutdoor(CharacterMultiplayer player)

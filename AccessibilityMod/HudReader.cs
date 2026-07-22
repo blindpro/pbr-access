@@ -321,19 +321,6 @@ namespace AccessibilityMod
                     return;
                 }
 
-                // Use CharacterInventory to check what the player actually has
-                // The game always sets weapon1 to "Handgun 01" by default
-                bool hasRealWeapon = charInv.weapon1 != null
-                    && charInv.weapon1.name != "Handgun 01";
-                bool hasWeapon2 = charInv.weapon2 != null;
-
-                if (!hasRealWeapon && !hasWeapon2)
-                {
-                    int grenades = character.GetGrenadesCurrent();
-                    ScreenReaderManager.Speak($"No weapon. {grenades} grenades");
-                    return;
-                }
-
                 var weapon = character.GetEquippedWeapon();
                 if (weapon == null)
                 {
@@ -341,11 +328,15 @@ namespace AccessibilityMod
                     return;
                 }
 
-                // Use inventory short_description for a cleaner name
+                // The pistol every player spawns with used to be reported as "No
+                // weapon", because the asset key is "Handgun 01" and that was read
+                // as the game's placeholder. It is a real, loaded, usable gun, and
+                // saying otherwise told a player with nothing else that they were
+                // unarmed. short_description is the name it has always had: Glock 19.
                 int currentWeaponSlot = charInv.GetCurrentWeapon();
                 var invItem = currentWeaponSlot == 0 ? charInv.weapon1 : charInv.weapon2;
-                string weaponName = invItem != null && !string.IsNullOrEmpty(invItem.short_description)
-                    ? invItem.short_description
+                string weaponName = invItem != null
+                    ? ItemText.Name(invItem)
                     : (weapon.GetWeaponName() ?? "Unknown");
 
                 int current = weapon.GetAmmunitionCurrent();
