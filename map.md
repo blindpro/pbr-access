@@ -224,6 +224,20 @@ Two usable facts for drop advice:
    likely by sweeping a dense ray fan across a wall face and keeping the contiguous no-hit
    spans that work out to a door's width rather than a building's edge.
 
+   **The reading that decides it is the detour, not the sample.** A walkable point inside
+   the footprint is weak evidence on its own — an axis-aligned box around a trailer
+   contains plenty of open ground, and a bake that ignored the buildings entirely would
+   also report "walkable inside". What cannot be faked is a route that travels 19 m to
+   reach something 4 m away: it went round to an opening, which is only possible if the
+   bake carved the walls out. So the diagnostic reports route length against straight-line
+   distance, and cross-checks with a `Physics.Linecast` — arriving straight through solid
+   wall is the disproof.
+
+   Two things it must be honest about, both learned the hard way: paths start from the
+   *sampled* mesh point rather than from the player, so distances have to be measured from
+   the path's own start, and whether the player is themselves on the mesh has to be said
+   out loud (sampled at 2 m, not 20 m) or a broken route has no explanation.
+
 ## Runtime handles worth remembering
 
 | What | Where |

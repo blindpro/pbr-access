@@ -73,7 +73,10 @@ namespace AccessibilityMod
         private const float CeilingCheckHeight = 20f;
         private bool _isIndoors;
         private bool _indoorStateSet;
-        private const float IndoorCheckInterval = 1f;
+        // Twice a second, because a change has to survive a second reading before it is
+        // spoken and a threshold called two seconds after you walked through it is not a
+        // threshold callout.
+        private const float IndoorCheckInterval = 0.5f;
         private float _indoorCheckTimer;
         private bool _pendingIndoors;
         private string _insideOf;
@@ -635,11 +638,7 @@ namespace AccessibilityMod
             if (_indoorCheckTimer > 0f) return;
             _indoorCheckTimer = IndoorCheckInterval;
 
-            Vector3 origin = player.transform.position + Vector3.up * 1.5f;
-
-            // Cast upward to detect a ceiling
-            bool hasCeiling = Physics.Raycast(origin, Vector3.up, out RaycastHit _, CeilingCheckHeight,
-                GetObstacleMask(), QueryTriggerInteraction.Ignore);
+            bool hasCeiling = HasCeiling(player, out RaycastHit _);
 
             // First check of a life only records where we are; there is no threshold to
             // announce when you have just landed.
@@ -678,6 +677,18 @@ namespace AccessibilityMod
 
             ScreenReaderManager.Speak(_insideOf == null ? "Outdoors" : $"Left the {_insideOf}");
             _insideOf = null;
+        }
+
+        /// <summary>
+        /// The overhead probe the threshold callout decides on: something solid within
+        /// reach above the player's head means a roof. Public so the diagnostic reports
+        /// this reading rather than a lookalike of its own that could disagree with it.
+        /// </summary>
+        public static bool HasCeiling(CharacterMultiplayer player, out RaycastHit hit)
+        {
+            Vector3 origin = player.transform.position + Vector3.up * 1.5f;
+            return Physics.Raycast(origin, Vector3.up, out hit, CeilingCheckHeight,
+                GetObstacleMask(), QueryTriggerInteraction.Ignore);
         }
 
         /// <summary>

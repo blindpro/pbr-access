@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.AI;
 using InfimaGames.LowPolyShooterPack;
@@ -14,18 +15,30 @@ namespace AccessibilityMod
     /// corner is the door. If it only covers the outdoors, the path stops at the wall
     /// and doorways have to be found by hand.
     ///
-    /// Nothing here helps a player mid-match; it exists to settle that one question
-    /// before either approach gets built on. See map.md.
+    /// The reading that settles it is the detour: a route that walks 19 metres to reach
+    /// something 4 metres away has gone round the building to an opening, which is only
+    /// possible if the bake knows the walls are there. A route that arrives in a straight
+    /// line through a wall proves the opposite - that the bake ignored the buildings and
+    /// its answers are worthless to us.
+    ///
+    /// Nothing here helps a player mid-match; it exists to settle that question before
+    /// either approach gets built on. See map.md.
     /// </summary>
     public class NavMeshDiagnostics
     {
         private const float LandmarkSearchRadius = 60f;
 
-        // How far off a wanted point the sampler may wander before its answer stops
-        // being about that point. A building is tens of metres across, so this is
-        // generous enough to find an interior floor and tight enough that a snap out
-        // to the road is reported as the miss it is.
-        private const float SampleRadius = 20f;
+        // Where the player stands, the mesh is either under their feet or it is not.
+        // Anything past a stride is the answer "you are off it", which is the single
+        // most useful thing this can say when a route comes back broken.
+        private const float FootSampleRadius = 2f;
+
+        // Hunting for the interior floor is a different question and gets a different
+        // budget: a building is tens of metres across.
+        private const float InteriorSampleRadius = 20f;
+
+        // A route this much longer than the straight line has gone round something.
+        private const float DetourRatio = 1.5f;
 
         public void Tick()
         {
@@ -38,73 +51,122 @@ namespace AccessibilityMod
                 return;
             }
 
+            var lines = new List<string> { "Navmesh check." };
             Vector3 playerPos = player.transform.position;
 
-            if (!NavMesh.SamplePosition(playerPos, out NavMeshHit standingOn, SampleRadius, NavMesh.AllAreas))
+            // What the threshold callout is deciding on, in the same words, so a wrong
+            // "entered the trailer" can be traced to what the ray actually hit.
+            lines.Add(NavigationAssistant.HasCeiling(player, out RaycastHit roof)
+                ? $"Roof overhead: {Landmarks.NameOr(roof.transform, "something unnamed")} " +
+                  $"{Metres(roof.distance)} up, so it reads as indoors."
+                : "Nothing overhead, so it reads as outdoors.");
+
+            if (!TryFindFooting(playerPos, out NavMeshHit standingOn, out string footing))
             {
-                Report("Navmesh check. No navmesh anywhere near you. Either it is not "
-                       + "baked in this scene or it does not reach here.");
+                lines.Add(footing);
+                Report(lines);
                 return;
             }
-
-            float underfoot = Vector3.Distance(playerPos, standingOn.position);
+            lines.Add(footing);
 
             var nearby = Landmarks.FindNearby(playerPos, LandmarkSearchRadius);
             if (nearby.Count == 0)
             {
-                Report($"Navmesh check. Standing {Metres(underfoot)} off the navmesh. "
-                       + "No named building within "
-                       + $"{(int)LandmarkSearchRadius} meters to test a route into.");
+                lines.Add($"No named building within {(int)LandmarkSearchRadius} meters to route into.");
+                Report(lines);
                 return;
             }
 
             Landmarks.Nearby target = nearby[0];
-            Vector3 middle = target.Bounds.center;
+            lines.Add($"{Capitalize(target.Name)}, {Metres(target.Distance)} away.");
 
-            // The interior floor, not the roof: the centre of a bounding box that
-            // includes the roof can sit in mid-air, which the sampler would answer for
-            // by dropping to whatever is below - possibly the ground outside.
+            // The interior floor, not the roof: the centre of a bounding box that includes
+            // the roof can sit in mid-air.
+            Vector3 middle = target.Bounds.center;
             middle.y = target.Bounds.min.y + 1f;
 
-            if (!NavMesh.SamplePosition(middle, out NavMeshHit inside, SampleRadius, NavMesh.AllAreas))
+            if (!NavMesh.SamplePosition(middle, out NavMeshHit inside, InteriorSampleRadius, NavMesh.AllAreas))
             {
-                Report($"Navmesh check. {Capitalize(target.Name)} {Metres(target.Distance)} away. "
-                       + "No navmesh within " + (int)SampleRadius + " meters of the middle of it. "
-                       + "Interiors are not baked.");
+                lines.Add($"No navmesh within {(int)InteriorSampleRadius} meters of the middle of it. "
+                          + "Interiors are not baked.");
+                Report(lines);
                 return;
             }
 
-            // The whole question, in one line: did the nearest walkable point to the
-            // middle of the building land inside its footprint, or out on the street?
-            bool interiorBaked = target.Bounds.Contains(inside.position);
-            float drift = Vector3.Distance(middle, inside.position);
+            lines.Add(target.Bounds.Contains(inside.position)
+                ? $"Walkable inside its footprint, {Metres(Vector3.Distance(middle, inside.position))} from the middle."
+                : $"Nearest walkable point is outside its footprint, "
+                  + $"{Metres(Vector3.Distance(middle, inside.position))} off.");
 
+            lines.Add(DescribeRoute(player, standingOn.position, inside.position));
+            Report(lines);
+        }
+
+        /// <summary>
+        /// Where the route will really start from. A path is calculated from the nearest
+        /// mesh point, not from the player, so a player standing off the mesh gets a route
+        /// that begins somewhere they are not - which is how a two corner, six metre path
+        /// ends up with its first turn seven metres away.
+        /// </summary>
+        private static bool TryFindFooting(Vector3 playerPos, out NavMeshHit standingOn, out string report)
+        {
+            if (NavMesh.SamplePosition(playerPos, out standingOn, FootSampleRadius, NavMesh.AllAreas))
+            {
+                report = "You are on the navmesh.";
+                return true;
+            }
+
+            if (!NavMesh.SamplePosition(playerPos, out standingOn, LandmarkSearchRadius, NavMesh.AllAreas))
+            {
+                report = "No navmesh anywhere near you. Either it is not baked in this scene "
+                         + "or it does not reach here.";
+                return false;
+            }
+
+            // Worth saying out loud: if standing where you are is off the mesh, then the
+            // mesh does not cover this spot, and every distance below is measured from
+            // somewhere else.
+            report = $"You are off the navmesh. The route starts "
+                     + $"{Metres(Vector3.Distance(playerPos, standingOn.position))} from you.";
+            return true;
+        }
+
+        /// <summary>
+        /// The verdict. Length against the straight line is what tells us whether the bake
+        /// knows the building is solid, and that is the whole question.
+        /// </summary>
+        private static string DescribeRoute(CharacterMultiplayer player, Vector3 from, Vector3 to)
+        {
             var path = new NavMeshPath();
-            bool routed = NavMesh.CalculatePath(standingOn.position, inside.position,
-                NavMesh.AllAreas, path);
+            bool routed = NavMesh.CalculatePath(from, to, NavMesh.AllAreas, path);
 
-            string route;
             if (!routed || path.status == NavMeshPathStatus.PathInvalid || path.corners.Length < 2)
-            {
-                route = "No route to it.";
-            }
+                return "No route to it at all.";
+
+            float straight = Vector3.Distance(from, to);
+            float length = PathLength(path);
+            bool blocked = Physics.Linecast(from + Vector3.up, to + Vector3.up,
+                GetSolidMask(), QueryTriggerInteraction.Ignore);
+
+            string verdict;
+            if (length > straight * DetourRatio)
+                verdict = "It goes the long way round, so the bake knows the walls are there "
+                          + "and this route is using an opening.";
+            else if (blocked)
+                verdict = "It arrives in a straight line through solid wall, so the bake "
+                          + "ignored the buildings and cannot find doors for us.";
             else
-            {
-                Vector3 firstTurn = path.corners[1];
-                string turn = DirectionTo(player.transform, firstTurn);
-                string complete = path.status == NavMeshPathStatus.PathComplete
-                    ? "Route complete" : "Route partial, it stops short";
+                verdict = "Straight there, but nothing solid is in the way, so this tells "
+                          + "us nothing either way. Try it from behind the building.";
 
-                route = $"{complete}, {path.corners.Length} corners, "
-                        + $"{Metres(PathLength(path))} total. "
-                        + $"First turn {turn}, {Metres(Vector3.Distance(playerPos, firstTurn))} away.";
-            }
+            // Measured from the path's own start, which is the only honest reference.
+            Vector3 firstTurn = path.corners[1];
+            string status = path.status == NavMeshPathStatus.PathComplete
+                ? "Route complete" : "Route partial, it stops short";
 
-            Report($"Navmesh check. {Capitalize(target.Name)} {Metres(target.Distance)} away. "
-                   + (interiorBaked
-                       ? $"Walkable inside its footprint, {Metres(drift)} from the middle. "
-                       : $"Nearest walkable point is outside its footprint, {Metres(drift)} off. ")
-                   + route);
+            return $"{status}, {path.corners.Length} corners, {Metres(length)} against "
+                   + $"{Metres(straight)} straight. First turn {DirectionTo(player.transform, firstTurn)}, "
+                   + $"{Metres(Vector3.Distance(from, firstTurn))} along. " + verdict;
         }
 
         private static float PathLength(NavMeshPath path)
@@ -116,10 +178,21 @@ namespace AccessibilityMod
         }
 
         /// <summary>Spoken and logged both: the log is what survives to be read after.</summary>
-        private static void Report(string text)
+        private static void Report(List<string> lines)
         {
+            string text = string.Join(" ", lines.ToArray());
             Plugin.Logger.LogInfo(text);
             ScreenReaderManager.Speak(text, true);
+        }
+
+        private static int GetSolidMask()
+        {
+            int mask = 1 << 0; // Default: where the buildings sit
+            int building = LayerMask.NameToLayer("Building");
+            if (building >= 0) mask |= 1 << building;
+            int env = LayerMask.NameToLayer("Environment");
+            if (env >= 0) mask |= 1 << env;
+            return mask;
         }
 
         private static string Metres(float distance)
