@@ -24,6 +24,12 @@ namespace AccessibilityMod
     /// The split keeps the hunt in the player's hands and quietly covers only the
     /// axis their keyboard cannot reach.
     ///
+    /// A fitted scope changes none of the geometry - it does not move the shot ray,
+    /// and spread never decided damage - but while aiming through one the game makes
+    /// every degree of look input worth less. Both speeds are scaled by that same
+    /// multiplier, so the assist stays slower than the player at any magnification
+    /// instead of taking over the fine work exactly where fine work is the point.
+    ///
     /// Everything is measured on the shot ray itself - the fps camera's position
     /// and forward, which is the exact ray ThirdPerson.ComputeLookAtRaycast fires
     /// and the only thing that decides damage. Steering used to be judged against
@@ -112,6 +118,15 @@ namespace AccessibilityMod
 
             bool isFiring = (bool)_holdingButtonFire.GetValue(character);
 
+            // Aiming down a scope makes every degree of look input worth less, and
+            // the assist steers the character directly rather than through OnLook,
+            // so it never saw that. Left alone it would slew at unscoped speed while
+            // the player's own arrow keys had gone fine and slow underneath it -
+            // the assist doing the aiming at the exact magnification where the point
+            // is to aim carefully. The same multiplier the game applies to the mouse
+            // is applied here.
+            float sensitivity = ScopeInfo.Sensitivity(character);
+
             GetAim(player, cameraLook, out Vector3 origin, out Vector3 aimDir);
 
             _target = FindTarget(player, origin, aimDir, AssistConeAngle);
@@ -128,7 +143,7 @@ namespace AccessibilityMod
             float pitchSpeed = isFiring
                 ? FirePitchSpeed
                 : Mathf.Lerp(PitchSpeedFar, PitchSpeedNear, centred);
-            SteerPitch(cameraLook, aimDir, toTarget, pitchSpeed * Time.deltaTime);
+            SteerPitch(cameraLook, aimDir, toTarget, pitchSpeed * sensitivity * Time.deltaTime);
 
             // Yaw only once they have brought the enemy close on their own.
             float yawCone = isFiring ? FireYawCone : YawConeAngle;
@@ -137,7 +152,7 @@ namespace AccessibilityMod
             float yawSpeed = isFiring
                 ? FireYawSpeed
                 : Mathf.Lerp(YawSpeedFar, YawSpeedNear, 1f - Mathf.Clamp01(offBy / yawCone));
-            SteerYaw(player, cameraLook, aimDir, toTarget, yawSpeed * Time.deltaTime);
+            SteerYaw(player, cameraLook, aimDir, toTarget, yawSpeed * sensitivity * Time.deltaTime);
         }
 
         /// <summary>Drops everything: dead, between matches, or back in the plane.</summary>

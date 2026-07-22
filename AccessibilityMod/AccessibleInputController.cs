@@ -32,6 +32,11 @@ namespace AccessibilityMod
         private static readonly MethodInfo _canPlayAnimationFire =
             AccessTools.Method(typeof(Character), "CanPlayAnimationFire");
 
+        // Character.Update computes aiming as holdingButtonAim && CanAim(), so
+        // setting the held flag is the whole of aiming down the sights.
+        private static readonly FieldInfo _holdingButtonAim =
+            AccessTools.Field(typeof(Character), "holdingButtonAim");
+
         // CameraLook rotation state - we modify this directly to avoid
         // the axisLook persistence bug that causes continuous spinning
         private static readonly FieldInfo _rotationCharacter =
@@ -63,8 +68,34 @@ namespace AccessibilityMod
             }
 
             HandleFire(character);
-            HandleTurning(player);
+            HandleAiming(player, character);
+            HandleTurning(player, character);
             HandleFacingReadout(player);
+        }
+
+        /// <summary>
+        /// X aims down the sights. Aiming is bound to a mouse button and nothing
+        /// else, so without this a scope could be found, carried and fitted and
+        /// never once used: its spread and sensitivity multipliers only apply while
+        /// aiming. Toggle rather than hold, because holding a key down through a
+        /// fight is its own barrier.
+        /// </summary>
+        private void HandleAiming(CharacterMultiplayer player, Character character)
+        {
+            if (LootMenu.IsOpen || InventoryMenu.IsOpen) return;
+            if (!Input.GetKeyDown(KeyCode.X)) return;
+
+            bool aiming = !(bool)_holdingButtonAim.GetValue(character);
+            _holdingButtonAim.SetValue(character, aiming);
+
+            if (!aiming)
+            {
+                ScreenReaderManager.Speak("Aim off");
+                return;
+            }
+
+            string scope = ScopeInfo.FittedScopeName(player.GetComponent<CharacterInventory>());
+            ScreenReaderManager.Speak(scope == null ? "Aiming, ironsights" : $"Aiming, {scope}");
         }
 
         private void HandleFire(Character character)
@@ -115,7 +146,7 @@ namespace AccessibilityMod
             }
         }
 
-        private void HandleTurning(CharacterMultiplayer player)
+        private void HandleTurning(CharacterMultiplayer player, Character character)
         {
             // Left Arrow closes the loot list and the inventory, so it must not also
             // spin the player while either is up.
@@ -126,7 +157,11 @@ namespace AccessibilityMod
 
             if (!leftHeld && !rightHeld) return;
 
-            float turnAmount = TurnSpeed * Time.deltaTime;
+            // The game slows mouse look while aiming down a scope. Turning here goes
+            // straight to the transform and skipped that, so a scoped turn was as
+            // coarse as an unscoped one - the magnification made the shot no easier
+            // to place. Same multiplier, same result.
+            float turnAmount = TurnSpeed * ScopeInfo.Sensitivity(character) * Time.deltaTime;
             float yaw = 0f;
 
             if (leftHeld) yaw = -turnAmount;

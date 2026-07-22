@@ -353,6 +353,11 @@ namespace AccessibilityMod
                 int reserveMags = weapon.GetCurrentMags();
                 string ammoText = $"{weaponName}, {current} of {magSize}, {reserveMags} magazines";
 
+                // A scope only does anything while aiming, so knowing one is fitted
+                // is what makes X worth pressing.
+                string scope = ScopeInfo.FittedScopeName(charInv);
+                if (scope != null) ammoText += $", {scope}";
+
                 int grenades2 = character.GetGrenadesCurrent();
                 ScreenReaderManager.Speak($"{ammoText}. {grenades2} grenades");
             }
