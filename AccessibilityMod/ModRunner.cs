@@ -12,6 +12,7 @@ namespace AccessibilityMod
         private AimAssist _aimAssist;
         private AudioTargeting _audioTargeting;
         private LootMenu _lootMenu;
+        private HealSlot _healSlot;
         private SafeZoneNav _safeZoneNav;
         private LockDiagnostics _lockDiagnostics;
         private bool _hasSpokenReady;
@@ -25,6 +26,7 @@ namespace AccessibilityMod
             _aimAssist = new AimAssist();
             _audioTargeting = new AudioTargeting();
             _lootMenu = new LootMenu();
+            _healSlot = new HealSlot();
             _safeZoneNav = new SafeZoneNav();
             _lockDiagnostics = new LockDiagnostics();
         }
@@ -44,6 +46,9 @@ namespace AccessibilityMod
                 _lootMenu.Tick();
                 _menuNavigator.Tick();
                 _hudReader.Tick();
+                // Before the input controller: the heal slot decides whether Left
+                // Control fires this frame or drinks.
+                _healSlot.Tick();
                 _inputController.Tick();
                 _navigationAssistant.Tick();
                 _aimAssist.Tick();

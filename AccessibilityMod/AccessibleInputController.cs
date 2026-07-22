@@ -7,7 +7,7 @@ namespace AccessibilityMod
 {
     /// <summary>
     /// Adds accessible input controls:
-    /// - Left Control: fire weapon
+    /// - Left Control: fire weapon, or use a heal when <see cref="HealSlot"/> is drawn
     /// - Left/Right Arrow: turn character
     /// - F: announce compass facing direction
     ///
@@ -69,6 +69,20 @@ namespace AccessibilityMod
 
         private void HandleFire(Character character)
         {
+            // Left Control means "use what I am holding", and with heals drawn that
+            // is not the gun. Releasing here as well keeps a shot from being left
+            // held down if the slot was drawn mid-burst.
+            if (HealSlot.IsArmed)
+            {
+                if (_wasFiring)
+                {
+                    _holdingButtonFire.SetValue(character, false);
+                    _shotsFired.SetValue(character, 0);
+                    _wasFiring = false;
+                }
+                return;
+            }
+
             bool fireDown = Input.GetKeyDown(KeyCode.LeftControl);
             bool fireUp = Input.GetKeyUp(KeyCode.LeftControl);
 
