@@ -18,7 +18,6 @@ namespace AccessibilityMod
         private float _nextRescanTime;
         private const float RescanInterval = 1.0f;
         private int _lastSelectableCount;
-        private Transform _scopeRoot;
 
         public void Tick()
         {
@@ -45,7 +44,6 @@ namespace AccessibilityMod
         {
             _currentSelectables.Clear();
 
-            var candidates = new List<Selectable>();
             var allSelectables = UnityEngine.Object.FindObjectsOfType<Selectable>();
 
             foreach (var s in allSelectables)
@@ -59,31 +57,22 @@ namespace AccessibilityMod
                 if (canvas != null && canvas.renderMode == RenderMode.WorldSpace)
                     continue;
 
-                candidates.Add(s);
-            }
-
-            // The game leaves the menu you came from switched on behind the one it
-            // just opened, so every button in the scene is live at once. Reading
-            // them as one list makes Settings sound like extra rows glued to the
-            // main menu. Keep only the panel that is actually on top.
-            Transform newScope = FindTopmostPanel(candidates);
-
-            foreach (var s in candidates)
-            {
-                if (newScope == null || s.transform.IsChildOf(newScope))
-                    _currentSelectables.Add(s);
+                _currentSelectables.Add(s);
             }
 
             // Sort top-to-bottom by screen Y position
             _currentSelectables.Sort((a, b) => GetScreenY(b).CompareTo(GetScreenY(a)));
 
-            bool scopeChanged = newScope != _scopeRoot;
-            _scopeRoot = newScope;
-
             // Log when selectables change
             if (_currentSelectables.Count != _lastSelectableCount)
             {
-                Plugin.Logger.LogInfo($"Found {_currentSelectables.Count} UI selectables in {(newScope != null ? newScope.name : "scene")}.");
+                Plugin.Logger.LogInfo($"Found {_currentSelectables.Count} UI selectables.");
+                if (_currentSelectables.Count > 0 && _lastSelectableCount == 0)
+                {
+                    string menuName = DetectMenuName();
+                    if (!string.IsNullOrEmpty(menuName))
+                        ScreenReaderManager.Speak(menuName);
+                }
                 _lastSelectableCount = _currentSelectables.Count;
             }
 
@@ -91,18 +80,6 @@ namespace AccessibilityMod
             {
                 _currentIndex = -1;
                 _lastSelected = null;
-                return;
-            }
-
-            // A new panel is a new menu: name it and start at its first row rather
-            // than leaving focus wherever the last menu left it.
-            if (scopeChanged)
-            {
-                string menuName = DetectMenuName(newScope);
-                if (!string.IsNullOrEmpty(menuName))
-                    ScreenReaderManager.Speak(menuName);
-                _lastSelected = null;
-                SetIndex(0);
                 return;
             }
 
@@ -383,130 +360,22 @@ namespace AccessibilityMod
             return screenPos.y;
         }
 
-        /// <summary>
-        /// The panel the player is really looking at: the container of whichever
-        /// live button is drawn last. Unity draws later siblings, and higher
-        /// sorting orders, on top - so the one that wins that comparison belongs
-        /// to the panel that opened most recently.
-        /// </summary>
-        private static Transform FindTopmostPanel(List<Selectable> candidates)
+        private static string DetectMenuName()
         {
-            if (candidates.Count == 0) return null;
-
-            Selectable anchor = candidates[0];
-            for (int i = 1; i < candidates.Count; i++)
-            {
-                if (IsDrawnAbove(candidates[i], anchor))
-                    anchor = candidates[i];
-            }
-
-            var canvas = anchor.GetComponentInParent<Canvas>();
-            Transform canvasTransform = canvas != null ? canvas.transform : null;
-
-            // Walk out of the button until we reach something that looks like a
-            // panel - a backing image or a fade group - and holds more than the
-            // one button, so a button sitting on its own artwork does not become
-            // a menu of one.
-            Transform node = anchor.transform.parent;
-            Transform widest = null;
-            while (node != null && node != canvasTransform)
-            {
-                widest = node;
-                if (IsPanel(node) && CountWithin(candidates, node) > 1)
-                    return node;
-                node = node.parent;
-            }
-
-            return widest;
-        }
-
-        private static bool IsPanel(Transform t)
-        {
-            // A button's own background is not the panel that contains it.
-            if (t.GetComponent<Selectable>() != null) return false;
-            if (t.GetComponent<CanvasGroup>() != null) return true;
-            if (t.GetComponent<Canvas>() != null) return true;
-
-            var graphic = t.GetComponent<Graphic>();
-            if (graphic != null && graphic.enabled && !(graphic is Text) && !(graphic is TMPro.TMP_Text))
-                return true;
-
-            return false;
-        }
-
-        private static int CountWithin(List<Selectable> candidates, Transform root)
-        {
-            int count = 0;
-            foreach (var s in candidates)
-            {
-                if (s.transform.IsChildOf(root))
-                    count++;
-            }
-            return count;
-        }
-
-        private static bool IsDrawnAbove(Selectable a, Selectable b)
-        {
-            int orderA = SortingOrderOf(a);
-            int orderB = SortingOrderOf(b);
-            if (orderA != orderB) return orderA > orderB;
-
-            var pathA = HierarchyPath(a.transform);
-            var pathB = HierarchyPath(b.transform);
-            for (int i = 0; i < pathA.Count && i < pathB.Count; i++)
-            {
-                if (pathA[i] != pathB[i]) return pathA[i] > pathB[i];
-            }
-            return pathA.Count > pathB.Count;
-        }
-
-        private static int SortingOrderOf(Selectable s)
-        {
-            var canvas = s.GetComponentInParent<Canvas>();
-            return canvas != null ? canvas.sortingOrder : 0;
-        }
-
-        private static List<int> HierarchyPath(Transform t)
-        {
-            var path = new List<int>();
-            for (Transform node = t; node != null; node = node.parent)
-                path.Add(node.GetSiblingIndex());
-            path.Reverse();
-            return path;
-        }
-
-        private static string DetectMenuName(Transform scope)
-        {
-            if (scope != null)
-            {
-                string title = LargestHeading(scope);
-                if (!string.IsNullOrEmpty(title))
-                    return title;
-                return CleanName(scope.gameObject.name);
-            }
-
             var canvases = UnityEngine.Object.FindObjectsOfType<Canvas>();
             foreach (var canvas in canvases)
             {
                 if (!canvas.gameObject.activeInHierarchy) continue;
                 if (canvas.renderMode == RenderMode.WorldSpace) continue;
 
-                string title = LargestHeading(canvas.transform);
-                if (!string.IsNullOrEmpty(title))
-                    return title;
-            }
-            return null;
-        }
-
-        private static string LargestHeading(Transform root)
-        {
-            var texts = root.GetComponentsInChildren<TMPro.TMP_Text>(false);
-            foreach (var t in texts)
-            {
-                if (t.GetComponentInParent<Selectable>() != null) continue;
-                if (string.IsNullOrWhiteSpace(t.text)) continue;
-                if (t.fontSize >= 24)
-                    return t.text.Trim();
+                var texts = canvas.GetComponentsInChildren<TMPro.TMP_Text>(false);
+                foreach (var t in texts)
+                {
+                    if (t.GetComponentInParent<Selectable>() != null) continue;
+                    if (string.IsNullOrWhiteSpace(t.text)) continue;
+                    if (t.fontSize >= 24)
+                        return t.text.Trim();
+                }
             }
             return null;
         }
