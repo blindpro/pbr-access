@@ -18,6 +18,27 @@ namespace AccessibilityMod
         private const float SearchRadius = 80f;
         private const float NearbyDistance = 40f;
 
+        // How far in from the sides of a footprint you must be to count as inside it.
+        private const float FootprintInset = 2f;
+
+        /// <summary>
+        /// Is this point inside the building, rather than beside it?
+        ///
+        /// The bounds are axis aligned, so a building standing at an angle to the world
+        /// drags a wedge of open ground in at each corner. Pulling the sides in keeps a
+        /// player walking past a corner from being told they are indoors. Small buildings
+        /// are inset proportionally: taking two metres off every side of a trailer would
+        /// leave nothing to stand in.
+        /// </summary>
+        public static bool IsInside(Bounds footprint, Vector3 point)
+        {
+            float insetX = Mathf.Min(FootprintInset, footprint.extents.x * 0.5f);
+            float insetZ = Mathf.Min(FootprintInset, footprint.extents.z * 0.5f);
+
+            footprint.Expand(new Vector3(-insetX * 2f, 0f, -insetZ * 2f));
+            return footprint.Contains(point);
+        }
+
         /// <summary>A named building standing near a point.</summary>
         public struct Nearby
         {

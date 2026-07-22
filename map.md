@@ -206,8 +206,9 @@ Two usable facts for drop advice:
    building it is speaking about: "entered the church", "left the church". The ceiling ray
    was already there; what it lacked was a name and a second reading to confirm the change
    before speaking it.
-7. **Getting through the door.** The open problem. Finding a building is solved; entering
-   one is not, and a doorway is a metre-wide gap that the callouts step straight past.
+7. ~~**Getting through the door.**~~ Done — `EntryGuide`, on the Q key. Finding a building
+   was solved; entering one was not, and a doorway is a metre-wide gap that the callouts
+   step straight past.
 
    The scene has a baked NavMesh — `CharacterBot` drives a `NavMeshAgent`, `GameManager`
    sets `NavMesh.pathfindingIterationsPerFrame`, `NavmeshPoint` calls
@@ -250,6 +251,22 @@ Two usable facts for drop advice:
    handed us: `PathPartial` is common (interior islands that do not connect), so a route
    has to be judged on `status` before its shape means anything, and a small detour with a
    blocked line of sight is the *good* case, not the bad one.
+
+   **What `EntryGuide` does with that.** It never looks for a door. It picks the nearest
+   building with walkable ground inside its own footprint — which is also the test that
+   rejects sealed props like trailers, so the guide never marches you across a field
+   towards a building with no way in — then routes to that interior point and steers you
+   to the first corner still ahead of you. That corner is the doorway, because a carved
+   bake leaves the route no other way through the wall.
+
+   Three decisions worth keeping: the route is **recalculated** every 0.4 s rather than
+   walked as a stored corner list, because players wander, get shot at, and come round the
+   other side, and a fresh route is always about where they are now; guidance is a **tone
+   at the corner**, not a stream of speech, because walking onto a sound beats steering off
+   "front left" and it leaves speech free for wall and enemy callouts; and **arrival is the
+   footprint test**, the same one the threshold callout uses, so "inside the shop" and
+   "entered the shop" cannot contradict each other. A partial route is still followed — it
+   walks you to the building — but says once that it may not reach the way in.
 
 ## Runtime handles worth remembering
 

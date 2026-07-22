@@ -18,6 +18,7 @@ namespace AccessibilityMod
         private MapGrid _mapGrid;
         private LockDiagnostics _lockDiagnostics;
         private NavMeshDiagnostics _navMeshDiagnostics;
+        private EntryGuide _entryGuide;
         private bool _hasSpokenReady;
 
         private void Awake()
@@ -35,6 +36,7 @@ namespace AccessibilityMod
             _mapGrid = new MapGrid();
             _lockDiagnostics = new LockDiagnostics();
             _navMeshDiagnostics = new NavMeshDiagnostics();
+            _entryGuide = new EntryGuide();
         }
 
         private void Update()
@@ -64,6 +66,7 @@ namespace AccessibilityMod
                 _mapGrid.Tick();
                 _lockDiagnostics.Tick();
                 _navMeshDiagnostics.Tick();
+                _entryGuide.Tick();
                 HitAnnouncer.Tick();
             }
             catch (Exception ex)

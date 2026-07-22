@@ -81,7 +81,6 @@ namespace AccessibilityMod
         private bool _pendingIndoors;
         private string _insideOf;
         private const float ThresholdSearchRadius = 25f;
-        private const float FootprintInset = 2f;
 
         // Weapon draw tracking
         private string _lastWeaponName;
@@ -313,54 +312,14 @@ namespace AccessibilityMod
 
         private void EnsureBeeps(CharacterMultiplayer player)
         {
-            const int sampleRate = 44100;
-
-            // Generic loot beep: a single 880 Hz tone.
+            // Generic loot: a single 880 Hz tone.
             if (_lootBeep == null)
-            {
-                float duration = 0.12f;
-                int sampleCount = (int)(sampleRate * duration);
-                float[] samples = new float[sampleCount];
-                for (int i = 0; i < sampleCount; i++)
-                {
-                    float t = (float)i / sampleRate;
-                    float envelope = 1f - (t / duration); // fade out
-                    samples[i] = Mathf.Sin(2f * Mathf.PI * 880f * t) * 0.5f * envelope;
-                }
-                _lootBeep = AudioClip.Create("LootBeep", sampleCount, 1, sampleRate, false);
-                _lootBeep.SetData(samples, 0);
-            }
+                _lootBeep = SpatialBeep.Tone("LootBeep", 880f, 0.12f);
 
-            // Ammo beep: a distinct higher-pitched DOUBLE beep so the player can
-            // instantly tell "this is ammo that fits my gun" apart from other loot.
+            // Ammo: a higher-pitched DOUBLE beep, so the player can tell "this is ammo
+            // that fits my gun" from other loot without stopping to listen.
             if (_ammoBeep == null)
-            {
-                const float pulse = 0.05f;
-                const float gap = 0.03f;
-                const float freq = 1245f;
-                float duration = pulse * 2f + gap;
-                int sampleCount = (int)(sampleRate * duration);
-                float[] samples = new float[sampleCount];
-                for (int i = 0; i < sampleCount; i++)
-                {
-                    float t = (float)i / sampleRate;
-                    float amp = 0f;
-                    if (t < pulse)
-                    {
-                        float env = 1f - (t / pulse);
-                        amp = Mathf.Sin(2f * Mathf.PI * freq * t) * 0.5f * env;
-                    }
-                    else if (t >= pulse + gap && t < pulse * 2f + gap)
-                    {
-                        float lt = t - (pulse + gap);
-                        float env = 1f - (lt / pulse);
-                        amp = Mathf.Sin(2f * Mathf.PI * freq * lt) * 0.5f * env;
-                    }
-                    samples[i] = amp;
-                }
-                _ammoBeep = AudioClip.Create("AmmoBeep", sampleCount, 1, sampleRate, false);
-                _ammoBeep.SetData(samples, 0);
-            }
+                _ammoBeep = SpatialBeep.Tone("AmmoBeep", 1245f, 0.05f, 2, 0.03f);
         }
 
         private void CheckLootProximityBeep(CharacterMultiplayer player)
@@ -402,29 +361,10 @@ namespace AccessibilityMod
                 bool hasCompatibleAmmo = BoxHasCompatibleAmmo(closestBox, inv);
                 AudioClip clip = hasCompatibleAmmo ? _ammoBeep : _lootBeep;
 
-                if (clip != null)
-                {
-                    // Play at the loot box's world position as 3D spatial audio
-                    PlaySpatialBeep(clip, closestBox.transform.position, Mathf.Lerp(0.5f, 1f, t));
-                }
+                // Play at the loot box's world position as 3D spatial audio.
+                SpatialBeep.PlayAt(clip, closestBox.transform.position,
+                    Mathf.Lerp(0.5f, 1f, t), LootScanRadius + 2f);
             }
-        }
-
-        private void PlaySpatialBeep(AudioClip clip, Vector3 position, float volume)
-        {
-            // Create a temporary GameObject with an AudioSource at the loot position
-            var tempObj = new GameObject("LootBeepTemp");
-            tempObj.transform.position = position;
-            var source = tempObj.AddComponent<AudioSource>();
-            source.clip = clip;
-            source.spatialBlend = 1f; // fully 3D
-            source.rolloffMode = AudioRolloffMode.Linear;
-            source.minDistance = 1f;
-            source.maxDistance = LootScanRadius + 2f;
-            source.volume = volume;
-            source.Play();
-            // Destroy after the clip finishes
-            Object.Destroy(tempObj, clip.length + 0.1f);
         }
 
         /// <summary>
@@ -701,7 +641,7 @@ namespace AccessibilityMod
             var nearby = Landmarks.FindNearby(position, ThresholdSearchRadius);
             for (int i = 0; i < nearby.Count; i++)
             {
-                if (!Footprint(nearby[i].Bounds).Contains(position)) continue;
+                if (!Landmarks.IsInside(nearby[i].Bounds, position)) continue;
 
                 building = nearby[i].Name;
                 return true;
@@ -711,22 +651,6 @@ namespace AccessibilityMod
 
             building = BuildingHere(player);
             return true;
-        }
-
-        /// <summary>
-        /// The footprint, pulled in at the sides. The box is axis aligned, so a building
-        /// standing at an angle to the world drags a wedge of open ground in at each
-        /// corner, and standing on that ground is not being inside. Small buildings are
-        /// inset proportionally: taking two metres off every side of a trailer would
-        /// leave nothing to stand in.
-        /// </summary>
-        private static Bounds Footprint(Bounds bounds)
-        {
-            float insetX = Mathf.Min(FootprintInset, bounds.extents.x * 0.5f);
-            float insetZ = Mathf.Min(FootprintInset, bounds.extents.z * 0.5f);
-
-            bounds.Expand(new Vector3(-insetX * 2f, 0f, -insetZ * 2f));
-            return bounds;
         }
 
         /// <summary>
@@ -805,7 +729,7 @@ namespace AccessibilityMod
             {
                 float angle = sweep > 180f ? sweep - 360f : sweep;
                 Vector3 dir = Quaternion.Euler(0, angle, 0) * t.forward;
-                string where = DirectionFromAngle(angle);
+                string where = Bearings.FromAngle(angle);
 
                 if (Physics.Raycast(origin, dir, out RaycastHit hit, InteriorScanDistance,
                     mask, QueryTriggerInteraction.Ignore))
@@ -856,7 +780,7 @@ namespace AccessibilityMod
 
             for (int i = 0; i < nearby.Count; i++)
                 candidates.Add(new Candidate(nearby[i].Name, nearby[i].Distance,
-                    BearingTo(t, nearby[i].Position)));
+                    Bearings.AngleTo(t, nearby[i].Position)));
 
             Vector3 origin = t.position + Vector3.up * 3f;
             int mask = GetObstacleMask();
@@ -898,7 +822,7 @@ namespace AccessibilityMod
                 // Pressed against its wall: "house here" beats "house ahead 0 meters".
                 parts.Add(metres <= StandingInside
                     ? $"{found[i].Name} here"
-                    : $"{found[i].Name} {DirectionFromAngle(found[i].Bearing)} {metres} meters");
+                    : $"{found[i].Name} {Bearings.FromAngle(found[i].Bearing)} {metres} meters");
             }
 
             return string.Join(". ", parts.ToArray());
@@ -961,20 +885,7 @@ namespace AccessibilityMod
 
         private static string GetRelativeDirection(Transform playerTransform, Vector3 targetPos)
         {
-            return DirectionFromAngle(BearingTo(playerTransform, targetPos));
-        }
-
-        /// <summary>Degrees from where the player faces, ignoring height.</summary>
-        private static float BearingTo(Transform playerTransform, Vector3 targetPos)
-        {
-            Vector3 toTarget = targetPos - playerTransform.position;
-            toTarget.y = 0;
-
-            // Standing in the doorway of the thing you asked about: call it straight ahead
-            // rather than letting SignedAngle guess off a zero-length vector.
-            if (toTarget.sqrMagnitude < 0.01f) return 0f;
-
-            return Vector3.SignedAngle(playerTransform.forward, toTarget, Vector3.up);
+            return Bearings.Relative(playerTransform, targetPos);
         }
 
         /// <summary>First letter up, for a landmark name that has to start a sentence.</summary>
@@ -982,19 +893,6 @@ namespace AccessibilityMod
         {
             if (string.IsNullOrEmpty(text)) return text;
             return char.ToUpper(text[0]) + text.Substring(1);
-        }
-
-        /// <summary>Shared 8-way vocabulary, for a bearing relative to player forward.</summary>
-        private static string DirectionFromAngle(float angle)
-        {
-            if (angle >= -22.5f && angle < 22.5f) return "ahead";
-            if (angle >= 22.5f && angle < 67.5f) return "front right";
-            if (angle >= 67.5f && angle < 112.5f) return "right";
-            if (angle >= 112.5f && angle < 157.5f) return "behind right";
-            if (angle >= -67.5f && angle < -22.5f) return "front left";
-            if (angle >= -112.5f && angle < -67.5f) return "left";
-            if (angle >= -157.5f && angle < -112.5f) return "behind left";
-            return "behind";
         }
 
         private static int GetObstacleMask()
