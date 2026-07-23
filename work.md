@@ -38,7 +38,7 @@ You can be shot from behind across a whole fight and never be told where it is c
   bursts throttled to 1.5s, a new direction re-fires after 0.6s so a flanker isn't masked). Read-only
   announcement, safe online. Builds clean.
 
-### A2. Winning / the match ending is never announced
+### A2. Winning / the match ending is never announced ✅ DONE
 Death is spoken (`HudReader.cs:117`, *"You died. Finished rank X"*). **Victory and match-end are not.**
 When the match finishes, `WinnersManager.Show()` puts up the top-3 / squad winners, the player's final
 rank, kills, and a **30-second countdown to the next match** (`WinnersManager.cs`,
@@ -51,6 +51,12 @@ rank, kills, and a **30-second countdown to the next match** (`WinnersManager.cs
   seconds"* countdown so the player isn't stranded on an unreadable screen.
 - Also read the surviving-to-the-end case: right now if you *win* (last one standing) rather than die,
   nothing at all is said.
+- **Implemented:** `HudReader.MonitorMatchEnd` watches `RoomStatus.Finish`. Win/loss is decided the
+  game's own way (`!player.IsDead()` at Finish, as in `GameManager.OnMatchFinished`): *"Victory! You
+  win with N kills"* or *"Match over. You finished rank R, K kills. <winner> won"*, each followed by the
+  live countdown read from `WinnersManager.nextMatchTimeTxt`, with 10s/5s reminders. Builds clean.
+  *Known limitation:* if the game destroys the dead player's object while spectating, the Finish callout
+  won't fire for that player (they already got the death/rank callout); revisit alongside A4 (spectate).
 
 ### A3. Parachute drop — you can't choose where you land
 `HudReader` announces the plane, the jump, chute open, height, and "Landed" (`HudReader.cs:137`), but

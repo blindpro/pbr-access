@@ -41,6 +41,13 @@ namespace AccessibilityMod
         private float _outsideZoneTimer;
         private const float OutsideZoneInterval = 10f;
 
+        // Match end / victory. The result screen is almost all static Text, which the
+        // menu navigator does not read, so a win, a loss and the next-match countdown
+        // were all silent.
+        private bool _announcedFinish;
+        private bool _announcedNext10;
+        private bool _announcedNext5;
+
         public void Tick()
         {
             var player = GetMainPlayer();
@@ -56,6 +63,7 @@ namespace AccessibilityMod
                     ResetParachuteState();
                     ResetMilestones();
                     ResetZoneState();
+                    ResetMatchEndState();
                 }
                 return;
             }
@@ -68,6 +76,7 @@ namespace AccessibilityMod
                 ResetParachuteState();
                 ResetMilestones();
                 ResetZoneState();
+                ResetMatchEndState();
                 ScreenReaderManager.Speak("In game");
             }
 
@@ -76,6 +85,7 @@ namespace AccessibilityMod
             MonitorParachute(player);
             MonitorRemaining();
             MonitorZone(player);
+            MonitorMatchEnd(player);
             HandleKeybinds(player);
         }
 
@@ -271,6 +281,107 @@ namespace AccessibilityMod
                 }
                 _wasOutsideZone = outsideZone;
             }
+        }
+
+        /// <summary>
+        /// Speaks the outcome the moment the match reaches Finish, then the countdown
+        /// to the next match. Winning is decided exactly the way the game decides it in
+        /// GameManager.OnMatchFinished: the local player wins if they are still alive
+        /// when the match ends. A player who died earlier already heard their rank, but
+        /// still needs to know the match is over and when the next one starts.
+        /// </summary>
+        private void MonitorMatchEnd(CharacterMultiplayer player)
+        {
+            if (MatchmakingManager.Instance == null) return;
+            var status = MatchmakingManager.Instance.GetRoomStatus();
+
+            if (status != MatchmakingManager.RoomStatus.Finish)
+            {
+                // Back in a live match (or between matches): arm for the next Finish.
+                ResetMatchEndState();
+                return;
+            }
+
+            if (!_announcedFinish)
+            {
+                _announcedFinish = true;
+                AnnounceOutcome(player);
+            }
+
+            MonitorNextMatchCountdown();
+        }
+
+        private void AnnounceOutcome(CharacterMultiplayer player)
+        {
+            int seconds = NextMatchSeconds();
+            string tail = seconds > 0 ? $". Next match in {seconds} seconds" : "";
+
+            if (!player.IsDead())
+            {
+                ScreenReaderManager.Speak($"Victory! You win with {player.kills} kills{tail}");
+                return;
+            }
+
+            string winner = FindWinnerName(player);
+            string who = winner == null ? "" : $". {winner} won";
+            ScreenReaderManager.Speak(
+                $"Match over. You finished rank {player.match_rank}, {player.kills} kills{who}{tail}");
+        }
+
+        /// <summary>
+        /// Reads the same next-match countdown the sighted player sees on the results
+        /// screen and calls it out at ten and five seconds, so the return to the lobby
+        /// isn't a surprise.
+        /// </summary>
+        private void MonitorNextMatchCountdown()
+        {
+            int seconds = NextMatchSeconds();
+            if (seconds <= 0) return;
+
+            if (seconds <= 10 && seconds > 5 && !_announcedNext10)
+            {
+                _announcedNext10 = true;
+                ScreenReaderManager.Speak("Next match in 10 seconds");
+            }
+            else if (seconds <= 5 && !_announcedNext5)
+            {
+                _announcedNext5 = true;
+                ScreenReaderManager.Speak($"Next match in {seconds} seconds");
+            }
+        }
+
+        /// <summary>
+        /// The live countdown from the results screen (WinnersManager.nextMatchTimeTxt),
+        /// or 0 when it isn't showing a number yet.
+        /// </summary>
+        private static int NextMatchSeconds()
+        {
+            try
+            {
+                if (MatchmakingManager.Instance == null) return 0;
+                var winners = MatchmakingManager.Instance.GetComponent<WinnersManager>();
+                if (winners == null || winners.nextMatchTimeTxt == null) return 0;
+                if (int.TryParse(winners.nextMatchTimeTxt.text, out int s)) return s;
+            }
+            catch (Exception) { }
+            return 0;
+        }
+
+        /// <summary>
+        /// The surviving enemy, for the "X won" flourish on a loss. In a solo match
+        /// exactly one player is alive at Finish; in squads this names one of the
+        /// winning side. Null if nobody obvious is left to name.
+        /// </summary>
+        private static string FindWinnerName(CharacterMultiplayer main)
+        {
+            foreach (var c in CharacterMultiplayer.characters)
+            {
+                if (c == null || c == main) continue;
+                if (c.isSpectating) continue;
+                if (c.IsDead()) continue;
+                if (!string.IsNullOrEmpty(c.Nickname)) return c.Nickname;
+            }
+            return null;
         }
 
         private void HandleKeybinds(CharacterMultiplayer player)
@@ -478,6 +589,13 @@ namespace AccessibilityMod
             _zoneShrinking = false;
             _wasOutsideZone = false;
             _outsideZoneTimer = 0f;
+        }
+
+        private void ResetMatchEndState()
+        {
+            _announcedFinish = false;
+            _announcedNext10 = false;
+            _announcedNext5 = false;
         }
 
         private static CharacterMultiplayer GetMainPlayer()
