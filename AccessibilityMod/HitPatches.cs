@@ -29,9 +29,20 @@ namespace AccessibilityMod
             var main = CharacterMultiplayer.GetMainPlayer();
             if (main == null) return;
 
-            // Only our own shots, and never our own body.
+            // Taking fire ourselves: the game shows a sighted player a directional
+            // damage cursor here (Damage calls HitCursorsManager.ShowDamageCursor for
+            // the local main player). Speak the direction instead. Actor 0 is the
+            // damage zone, not an attacker - it has its own outside-zone warning.
+            if (__instance == main)
+            {
+                if (shooterActorId == 0) return;
+                if ((byte)main.ActorNumber == shooterActorId) return; // self / fall damage
+                IncomingFireAnnouncer.Report(main, shooterActorId);
+                return;
+            }
+
+            // Only our own shots land hit markers, and never our own body.
             if ((byte)main.ActorNumber != shooterActorId) return;
-            if (__instance == main) return;
 
             HitAnnouncer.ReportHit(__instance, damage, __instance.health);
         }
@@ -49,6 +60,55 @@ namespace AccessibilityMod
             if (__instance == main) return;
 
             HitAnnouncer.ReportKill(__instance);
+        }
+    }
+
+    /// <summary>
+    /// Speaks the direction incoming fire is coming from - the audible equivalent of
+    /// the red damage cursor a sighted player sees the instant a bullet lands. Bursts
+    /// are throttled so an automatic weapon does not machine-gun the screen reader, but
+    /// a shot from a NEW direction is spoken promptly so a flanker is never masked by
+    /// the throttle on the enemy already in front of you.
+    /// </summary>
+    public static class IncomingFireAnnouncer
+    {
+        // Steady fire from one direction repeats no faster than this.
+        private const float MinInterval = 1.5f;
+        // Even a direction change will not re-fire faster than this, to stop a target
+        // crossing a bucket boundary from stuttering.
+        private const float MinReannounce = 0.6f;
+
+        private static float _lastSpeakTime;
+        private static string _lastDirection;
+        private static byte _lastShooterId;
+
+        public static void Report(CharacterMultiplayer victim, byte shooterActorId)
+        {
+            var shooter = CharacterMultiplayer.GetPlayer(shooterActorId);
+
+            string direction = shooter != null
+                ? Bearings.Relative(victim.transform, Targeting.ChestOf(shooter))
+                : null;
+
+            float now = Time.time;
+            bool newSource = shooterActorId != _lastShooterId || direction != _lastDirection;
+            bool floor = now - _lastSpeakTime >= (newSource ? MinReannounce : MinInterval);
+            if (!floor) return;
+
+            _lastSpeakTime = now;
+            _lastDirection = direction;
+            _lastShooterId = shooterActorId;
+
+            // Urgent: it should win over loot and landmark chatter, the same as a
+            // close-enemy callout.
+            ScreenReaderManager.Speak(direction == null ? "Taking fire" : $"Taking fire, {direction}", true);
+        }
+
+        public static void Reset()
+        {
+            _lastSpeakTime = 0f;
+            _lastDirection = null;
+            _lastShooterId = 0;
         }
     }
 
