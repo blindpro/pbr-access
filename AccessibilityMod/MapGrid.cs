@@ -20,6 +20,19 @@ namespace AccessibilityMod
     /// </summary>
     public class MapGrid
     {
+        /// <summary>
+        /// Singleton instance of the active MapGrid.
+        /// </summary>
+        public static MapGrid Instance { get; private set; }
+
+        /// <summary>
+        /// Initializes a new instance of the MapGrid class.
+        /// </summary>
+        public MapGrid()
+        {
+            Instance = this;
+        }
+
         // 10 x 10, so a ~2100 metre map gives ~210 metre cells: coarse enough to name a
         // drop, fine enough that "D2" means one place.
         private const int Columns = 10;
@@ -108,6 +121,8 @@ namespace AccessibilityMod
         /// </summary>
         private void MonitorCellChange(Vector3 focus)
         {
+            if (Plugin.IsGameplayWarmingUp) return;
+
             string cell = GetCell(focus);
             if (cell == null || cell == _announcedCell) return;
             if (DistanceInsideCell(focus) < CellEntryMargin) return;
@@ -128,8 +143,15 @@ namespace AccessibilityMod
         /// up as you walk north. Numbers rising northward matches the compass the F key
         /// already speaks, so "heading to D8" and "heading north" agree.
         /// </summary>
-        private string GetCell(Vector3 worldPos)
+        /// <summary>
+        /// Gets the coordinate grid cell for a given 3D position.
+        /// </summary>
+        /// <param name="worldPos">The 3D position in the world.</param>
+        /// <returns>The cell name (e.g. "D4") or null if off bounds.</returns>
+        public string GetCell(Vector3 worldPos)
         {
+            if (!EnsureBounds()) return null;
+
             float size = CellSize();
             float minX = _mapCenter.x - _mapHalfExtent;
             float minZ = _mapCenter.z - _mapHalfExtent;

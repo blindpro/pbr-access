@@ -4,6 +4,7 @@ using System.Linq;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
+using InfimaGames.LowPolyShooterPack;
 
 namespace AccessibilityMod
 {
@@ -16,14 +17,66 @@ namespace AccessibilityMod
         private const float RepeatRate = 0.15f;
         private float _nextRepeatTime;
         private float _nextRescanTime;
-        private const float RescanInterval = 1.0f;
+        private const float RescanInterval = 3.0f;
         private int _lastSelectableCount;
+        private bool _wasPausedInMenu;
+
+        /// <summary>
+        /// Initializes a new instance of the MenuNavigator class.
+        /// Hooks into the scene loaded event to force an immediate rescan.
+        /// </summary>
+        public MenuNavigator()
+        {
+            UnityEngine.SceneManagement.SceneManager.sceneLoaded += (scene, mode) =>
+            {
+                _nextRescanTime = 0f;
+            };
+        }
 
         public void Tick()
         {
+            // Track game pause/resume transitions
+            var player = CharacterMultiplayer.GetMainPlayer();
+            bool isDead = player != null && player.IsDead();
+            bool currentPaused = !isDead && (
+                                 (HP.Generics.PauseManager.instance != null && HP.Generics.PauseManager.instance.Bool_IsGamePaused) 
+                                 || (MatchmakingManager.Instance != null 
+                                     && MatchmakingManager.Instance.GetRoomStatus() == MatchmakingManager.RoomStatus.Playing 
+                                     && Cursor.visible 
+                                     && !LootMenu.IsOpen 
+                                     && !InventoryMenu.IsOpen)
+                                 );
+
+            if (currentPaused != _wasPausedInMenu)
+            {
+                _wasPausedInMenu = currentPaused;
+                if (currentPaused)
+                {
+                    ScreenReaderManager.Speak(Loc.Get("game_paused"));
+                    _nextRescanTime = 0f; // Force immediate rebuild of pause menu
+                }
+                else
+                {
+                    ScreenReaderManager.Speak(Loc.Get("game_resumed"));
+                }
+            }
+
             // The loot list and the inventory borrow Up, Down and Enter while they
             // are open; HUD buttons must not answer them at the same time.
             if (LootMenu.IsOpen || InventoryMenu.IsOpen) return;
+
+            // Completely skip menu checks during active unpaused gameplay to avoid FindObjectsOfType CPU overhead.
+            if (!IsInMenu())
+            {
+                if (_currentSelectables.Count > 0)
+                {
+                    _currentSelectables.Clear();
+                    _currentIndex = -1;
+                    _lastSelected = null;
+                    _lastSelectableCount = 0;
+                }
+                return;
+            }
 
             // Periodically rescan for selectables
             if (Time.unscaledTime >= _nextRescanTime)
@@ -43,6 +96,13 @@ namespace AccessibilityMod
         private void RebuildSelectablesList()
         {
             _currentSelectables.Clear();
+
+            if (EventSystem.current == null)
+            {
+                _currentIndex = -1;
+                _lastSelected = null;
+                return;
+            }
 
             var allSelectables = UnityEngine.Object.FindObjectsOfType<Selectable>();
 
@@ -176,10 +236,21 @@ namespace AccessibilityMod
             if (sel == null || sel == _lastSelected) return;
 
             int idx = _currentSelectables.IndexOf(sel);
-            if (idx >= 0 && idx != _currentIndex)
+            if (idx < 0)
+            {
+                // UI changed externally. Rebuild immediately to discover new selectables!
+                RebuildSelectablesList();
+                idx = _currentSelectables.IndexOf(sel);
+            }
+
+            // Always update _lastSelected to the currently selected Component,
+            // even if it was filtered out of our navigation list.
+            // This prevents calling RebuildSelectablesList() on every frame!
+            _lastSelected = sel;
+
+            if (idx >= 0)
             {
                 _currentIndex = idx;
-                _lastSelected = sel;
                 AnnounceSelectable(sel);
             }
         }
@@ -314,12 +385,13 @@ namespace AccessibilityMod
             return result;
         }
 
-        private static void ActivateSelectable(Selectable selectable)
+        private void ActivateSelectable(Selectable selectable)
         {
             if (selectable is Button button)
             {
                 button.onClick.Invoke();
                 ScreenReaderManager.Speak("activated");
+                _nextRescanTime = 0f;
                 return;
             }
 
@@ -328,6 +400,7 @@ namespace AccessibilityMod
                 toggle.isOn = !toggle.isOn;
                 string state = toggle.isOn ? "checked" : "not checked";
                 ScreenReaderManager.Speak(state);
+                _nextRescanTime = 0f;
                 return;
             }
 
@@ -335,6 +408,7 @@ namespace AccessibilityMod
             {
                 dropdown.Show();
                 ScreenReaderManager.Speak("opened dropdown");
+                _nextRescanTime = 0f;
                 return;
             }
 
@@ -342,6 +416,7 @@ namespace AccessibilityMod
             {
                 inputField.ActivateInputField();
                 ScreenReaderManager.Speak("editing");
+                _nextRescanTime = 0f;
                 return;
             }
 
@@ -378,6 +453,24 @@ namespace AccessibilityMod
                 }
             }
             return null;
+        }
+
+        private static bool IsInMenu()
+        {
+            if (EventSystem.current == null) return false;
+
+            if (MatchmakingManager.Instance == null) return true;
+            var status = MatchmakingManager.Instance.GetRoomStatus();
+            if (status != MatchmakingManager.RoomStatus.Playing) return true;
+
+            var main = CharacterMultiplayer.GetMainPlayer();
+            if (main != null && main.IsDead()) return true;
+
+            if (HP.Generics.PauseManager.instance != null && HP.Generics.PauseManager.instance.Bool_IsGamePaused) return true;
+
+            if (Cursor.visible) return true;
+
+            return false;
         }
     }
 }

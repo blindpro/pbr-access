@@ -1,5 +1,6 @@
 using System;
 using UnityEngine;
+using InfimaGames.LowPolyShooterPack;
 
 namespace AccessibilityMod
 {
@@ -41,6 +42,16 @@ namespace AccessibilityMod
         {
             try
             {
+                if (MatchmakingManager.Instance != null && MatchmakingManager.Instance.GetRoomStatus() == MatchmakingManager.RoomStatus.Playing)
+                {
+                    if (Plugin.GameplayWarmupTimer > 0f)
+                        Plugin.GameplayWarmupTimer -= Time.deltaTime;
+                }
+                else
+                {
+                    Plugin.GameplayWarmupTimer = 3.0f;
+                }
+
                 if (!_hasSpokenReady)
                 {
                     _hasSpokenReady = true;
