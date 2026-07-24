@@ -12,7 +12,8 @@ namespace AccessibilityMod
     /// now gathers every item within pick range instead:
     /// - one item, it is simply taken
     /// - more than one, a spoken list opens. Up and Down move through it, Enter
-    ///   takes the selected item, and Left Arrow, Escape or E closes it.
+    ///   takes the selected item, and Left Arrow, Escape or E closes it. The
+    ///   mouse does the same two things: the wheel moves, left click takes.
     ///
     /// The list rebuilds after each take, so the player can empty a pile without
     /// reopening anything.
@@ -51,6 +52,21 @@ namespace AccessibilityMod
         /// </summary>
         private static float _blockPauseUntil;
         public static bool BlocksPause => IsOpen || Time.time < _blockPauseUntil;
+
+        /// <summary>
+        /// Left click takes the selected item, so it must not also fire the gun -
+        /// that is the game's own binding for it. PickupPatches holds off
+        /// Character.OnTryFire while this is true.
+        /// </summary>
+        public static bool BlocksFire => IsOpen;
+
+        // One wheel notch is one row. How much a notch is worth varies by mouse
+        // and platform - a free-spinning wheel can report a stream of fractions -
+        // so the step is taken from the sign, and a short cooldown keeps a single
+        // flick from running the whole list past the player faster than it can be
+        // spoken.
+        private const float ScrollStepCooldown = 0.12f;
+        private float _nextScrollStep;
 
         private readonly List<Entry> _entries = new List<Entry>();
         private int _index;
@@ -100,6 +116,16 @@ namespace AccessibilityMod
                 return;
             }
 
+            // Wheel up is up the list, matching every other list the player has
+            // ever scrolled.
+            float scroll = Input.mouseScrollDelta.y;
+            if (scroll != 0f && Time.time >= _nextScrollStep)
+            {
+                _nextScrollStep = Time.time + ScrollStepCooldown;
+                Move(scroll > 0f ? -1 : 1);
+                return;
+            }
+
             if (Input.GetKeyDown(KeyCode.UpArrow))
             {
                 Move(-1);
@@ -112,7 +138,9 @@ namespace AccessibilityMod
                 return;
             }
 
-            if (Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter))
+            if (Input.GetKeyDown(KeyCode.Return)
+                || Input.GetKeyDown(KeyCode.KeypadEnter)
+                || Input.GetMouseButtonDown(0))
                 Take(pickupsMgr);
         }
 

@@ -1,6 +1,7 @@
 using HarmonyLib;
 using InfimaGames.LowPolyShooterPack;
 using UnityEngine;
+using UnityEngine.InputSystem;
 
 namespace AccessibilityMod
 {
@@ -47,6 +48,25 @@ namespace AccessibilityMod
         {
             return !LootMenu.BlocksPause && !InventoryMenu.BlocksGameInventory;
         }
+
+        /// <summary>
+        /// Left click takes the selected item out of the loot list, so it must not
+        /// also pull the trigger. Only the press and the shot are held off - a
+        /// release still gets through, so a burst that was being held when the list
+        /// opened cannot be left running with the button already up.
+        /// </summary>
+        // Harmony003 fires on the read of context.phase - the getter of a struct
+        // property takes this by reference, which the analyzer cannot tell apart
+        // from an assignment. Nothing here writes to the context.
+#pragma warning disable Harmony003
+        [HarmonyPrefix]
+        [HarmonyPatch(typeof(Character), "OnTryFire")]
+        static bool Character_OnTryFire_Prefix(InputAction.CallbackContext context)
+        {
+            if (!LootMenu.BlocksFire) return true;
+            return context.phase == InputActionPhase.Canceled;
+        }
+#pragma warning restore Harmony003
 
         /// <summary>
         /// The game's own inventory screen is mouse-only drag and drop, and opening

@@ -44,6 +44,7 @@ X                Toggle aim down sights
 3                Draw heals (1 or 2 puts the weapon back)
 I                Accessible inventory
 E                Loot list - Up/Down to browse, Enter takes, Left or Escape closes
+                 Mouse works too: the wheel browses and left click takes
 
 H                Health
 Z                Ammo, and the sight fitted to your weapon
