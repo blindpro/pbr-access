@@ -376,8 +376,8 @@ visible screen agrees with what was spoken.
 | Key | Action |
 | --- | --- |
 | **I** | Open / close |
-| **Up / Down** | Move through equipment then bag |
-| **Enter** | Hold a weapon · use a heal, grenade or ammo · fit an attachment · take one off |
+| **Up / Down** *or the mouse wheel* | Move through equipment then bag |
+| **Enter** *or left click* | Hold a weapon · use a heal, grenade or ammo · fit an attachment · take one off |
 | **Delete** / Backspace | Drop |
 | **Left Arrow** / Escape | Close |
 
@@ -400,7 +400,7 @@ cursor, and it must not come up behind the accessible one.
 | Left / Right Arrow | Turn (scaled by scope sensitivity while aiming) |
 | **X** | Toggle aim down sights *(new)* |
 | **3** | Draw heals; **1** / **2** put the weapon back *(new)* |
-| **I** | Accessible inventory *(new)* |
+| **I** | Accessible inventory — Up/Down or **mouse wheel**, Enter or **left click** activates, Delete drops *(new)* |
 | E | Loot list — Up/Down, Enter takes, Left/Escape closes. **Mouse wheel browses and left click takes** *(new)* |
 | H | Health · Z ammo (+ fitted sight) · K kills & players · L full status · J height |
 | F | Compass facing · B surroundings survey (names buildings: "church ahead 30 meters") · N safe zone · T lock diagnostics |

@@ -19,7 +19,8 @@ namespace AccessibilityMod
     /// game's HUD so the visible screen agrees with what was just said.
     ///
     /// I opens and closes it. Up and Down move, Enter is the obvious thing to do
-    /// with the row - fit it, use it, hold it - and Delete drops. Every row is
+    /// with the row - fit it, use it, hold it - and Delete drops. The mouse does
+    /// the first two: the wheel moves and left click activates. Every row is
     /// spoken with its slot, so an empty scope mount announces itself as one; the
     /// player learns the shape of their kit by walking it, rather than having to
     /// remember which frame is which.
@@ -56,6 +57,18 @@ namespace AccessibilityMod
         /// </summary>
         private static float _blockGameUntil;
         public static bool BlocksGameInventory => IsOpen || Time.time < _blockGameUntil;
+
+        /// <summary>
+        /// Left click activates the row, so it must not also fire the gun.
+        /// PickupPatches holds off Character.OnTryFire while this is true.
+        /// </summary>
+        public static bool BlocksFire => IsOpen;
+
+        // As in LootMenu: one notch is one row, taken from the sign because a
+        // notch is worth different amounts on different mice, and no faster than
+        // the rows can be spoken.
+        private const float ScrollStepCooldown = 0.12f;
+        private float _nextScrollStep;
 
         private readonly List<Row> _rows = new List<Row>();
         private int _index;
@@ -109,10 +122,21 @@ namespace AccessibilityMod
             Rebuild(charInv);
             if (_rows.Count == 0) { Close("Inventory empty"); return; }
 
+            // Wheel up is up the list, as in every other list.
+            float scroll = Input.mouseScrollDelta.y;
+            if (scroll != 0f && Time.time >= _nextScrollStep)
+            {
+                _nextScrollStep = Time.time + ScrollStepCooldown;
+                Move(charInv, scroll > 0f ? -1 : 1);
+                return;
+            }
+
             if (Input.GetKeyDown(KeyCode.UpArrow)) { Move(charInv, -1); return; }
             if (Input.GetKeyDown(KeyCode.DownArrow)) { Move(charInv, 1); return; }
 
-            if (Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter))
+            if (Input.GetKeyDown(KeyCode.Return)
+                || Input.GetKeyDown(KeyCode.KeypadEnter)
+                || Input.GetMouseButtonDown(0))
             {
                 Activate(player, charInv);
                 return;

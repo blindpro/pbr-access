@@ -42,7 +42,8 @@ Left / Right     Turn (slower while aiming, matched to the scope)
 X                Toggle aim down sights
 1 / 2            Weapon slots
 3                Draw heals (1 or 2 puts the weapon back)
-I                Accessible inventory
+I                Accessible inventory - Up/Down browse, Enter uses, Delete drops
+                 Mouse works too: the wheel browses and left click uses
 E                Loot list - Up/Down to browse, Enter takes, Left or Escape closes
                  Mouse works too: the wheel browses and left click takes
 

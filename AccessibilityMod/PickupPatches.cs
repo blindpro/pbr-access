@@ -50,10 +50,11 @@ namespace AccessibilityMod
         }
 
         /// <summary>
-        /// Left click takes the selected item out of the loot list, so it must not
-        /// also pull the trigger. Only the press and the shot are held off - a
-        /// release still gets through, so a burst that was being held when the list
-        /// opened cannot be left running with the button already up.
+        /// Left click takes the selected item out of the loot list, and activates
+        /// the selected row of the inventory, so it must not also pull the trigger.
+        /// Only the press and the shot are held off - a release still gets through,
+        /// so a burst that was being held when a list opened cannot be left running
+        /// with the button already up.
         /// </summary>
         // Harmony003 fires on the read of context.phase - the getter of a struct
         // property takes this by reference, which the analyzer cannot tell apart
@@ -63,7 +64,7 @@ namespace AccessibilityMod
         [HarmonyPatch(typeof(Character), "OnTryFire")]
         static bool Character_OnTryFire_Prefix(InputAction.CallbackContext context)
         {
-            if (!LootMenu.BlocksFire) return true;
+            if (!LootMenu.BlocksFire && !InventoryMenu.BlocksFire) return true;
             return context.phase == InputActionPhase.Canceled;
         }
 #pragma warning restore Harmony003
