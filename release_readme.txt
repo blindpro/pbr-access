@@ -38,6 +38,7 @@ KEYS
 ----
 
 Left Control     Fire - or use a heal when the heal slot is drawn
+Escape           Pause Menu - opens pause menu and announces buttons
 Left / Right     Turn (slower while aiming, matched to the scope)
 X                Toggle aim down sights
 1 / 2            Weapon slots

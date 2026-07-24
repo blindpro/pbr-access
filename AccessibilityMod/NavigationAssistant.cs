@@ -126,13 +126,16 @@ namespace AccessibilityMod
             if (_scanTimer > 0f) return;
             _scanTimer = ScanInterval;
 
-            EnsureBeeps(player);
-            CheckWallAhead(player);
-            CheckDoorways(player);
-            CheckNearbyLoot(player);
-            CheckLootProximityBeep(player);
-            CheckBuildingsInDistance(player);
-            CheckPickupConfirmation(player);
+            if (!Plugin.IsGameplayWarmingUp)
+            {
+                EnsureBeeps(player);
+                CheckWallAhead(player);
+                CheckDoorways(player);
+                CheckNearbyLoot(player);
+                CheckLootProximityBeep(player);
+                CheckBuildingsInDistance(player);
+                CheckPickupConfirmation(player);
+            }
             CheckWeaponDraw(player);
             CheckIndoorOutdoor(player);
         }

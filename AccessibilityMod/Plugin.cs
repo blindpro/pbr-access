@@ -18,12 +18,16 @@ namespace AccessibilityMod
         internal static new ManualLogSource Logger;
         internal static Harmony HarmonyInstance;
 
+        public static float GameplayWarmupTimer = 0f;
+        public static bool IsGameplayWarmingUp => GameplayWarmupTimer > 0f;
+
         private void Awake()
         {
             Logger = base.Logger;
             Logger.LogInfo($"{PluginName} v{PluginVersion} loaded!");
 
             ScreenReaderManager.Initialize(Logger);
+            Loc.Initialize();
 
             HarmonyInstance = new Harmony(PluginGUID);
             HarmonyInstance.PatchAll();

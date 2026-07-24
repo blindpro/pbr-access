@@ -24,3 +24,7 @@ Desktop.ini
 *.claude/
 ## Generated release payload (rebuilt by deploy.bat)
 release/
+docs-de/
+docs/
+templates/
+scripts/
