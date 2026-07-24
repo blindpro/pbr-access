@@ -1,7 +1,12 @@
 # Polygon Bit Battle Royale — Accessibility Mod
 
-A BepInEx mod that makes Polygon Bit Battle Royale playable without sight. It speaks the menus, your health and ammo, the loot on the ground, the safe zone,
-and where you are on the map.
+A BepInEx mod that makes Polygon Bit Battle Royale playable without sight. It provides:
+- **Screen Reader Navigation:** NVDA, JAWS, System Access and SAPI narration for all menus and settings.
+- **Altitudes & Parachute Feedback:** Periodic coordinates and landmarks below the player while free falling.
+- **Weapon Feedback:** Firing, dry-fire, and reload progress voice feedback.
+- **Safe Zone Timer:** Automated zone shrinkage countdown notifications.
+- **Teammate & Spectator Narration:** Teammate status and active spectator target voiceovers.
+- **Pause & Resume Feedback:** Instantly reads menu options when pausing/resuming.
 
 Screen reader output goes through [Tolk](https://github.com/dkager/tolk), so NVDA, JAWS, System
 Access and SAPI all work.

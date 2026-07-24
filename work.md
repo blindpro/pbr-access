@@ -78,7 +78,7 @@ where you want to follow a living teammate.
 - **Do:** announce *"Spectating <name>"* on the spectate transition and when the spectated target
   changes.
 
-### A5. No shrink-timer countdown — only "soon"
+### A5. No shrink-timer countdown — only "soon" ✅ DONE
 `HudReader.MonitorZone` speaks qualitative warnings ("appearing soon", "shrinking soon", "shrinking
 now" — `HudReader.cs:227`). But the game shows sighted players an actual **numeric countdown**:
 `DamageZoneManager.appearsInTimer` / `shrinkInTimer` with `appearsInTimerTxt` / `shrinkInTimerTxt`
@@ -112,7 +112,7 @@ with.
   *"3 enemies: ahead, left, behind right"*), separate from the single-target lock audio so it doesn't
   muddy the aim cue. Keep it low-frequency.
 
-### B2. Reload / truly-empty is thin
+### B2. Reload / truly-empty is thin ✅ DONE
 `AudioTargeting` says *"Reload"* once, but only when you have a lock on a target and the gun is empty
 (`AudioTargeting.cs:245`). Outside that exact moment there's no clean *"out of ammo"* / *"reloading"* /
 *"reloaded"* feedback, and no distinction between "empty mag, reserves available" and "completely dry,

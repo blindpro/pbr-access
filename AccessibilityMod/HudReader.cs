@@ -48,6 +48,8 @@ namespace AccessibilityMod
         private bool _announcedNext10;
         private bool _announcedNext5;
 
+        private CharacterMultiplayer _lastSpectatedPlayer;
+
         public void Tick()
         {
             var player = GetMainPlayer();
@@ -64,6 +66,7 @@ namespace AccessibilityMod
                     ResetMilestones();
                     ResetZoneState();
                     ResetMatchEndState();
+                    _lastSpectatedPlayer = null;
                 }
                 return;
             }
@@ -73,10 +76,13 @@ namespace AccessibilityMod
                 _wasInGame = true;
                 _lastHealth = player.health;
                 _lastKills = player.kills;
+                _announcedLow = false;
+                _announcedCritical = false;
                 ResetParachuteState();
                 ResetMilestones();
                 ResetZoneState();
                 ResetMatchEndState();
+                _lastSpectatedPlayer = null;
                 ScreenReaderManager.Speak("In game");
             }
 
@@ -86,6 +92,7 @@ namespace AccessibilityMod
             MonitorRemaining();
             MonitorZone(player);
             MonitorMatchEnd(player);
+            MonitorSpectate();
             HandleKeybinds(player);
         }
 
@@ -186,7 +193,26 @@ namespace AccessibilityMod
                     _heightAnnounceTimer = HeightAnnounceInterval;
                     float height = player.transform.position.y;
                     int rounded = Mathf.RoundToInt(height);
-                    ScreenReaderManager.Speak($"{rounded} meters");
+
+                    Vector3 groundPos = GetGroundPosition(player.transform.position);
+                    string cell = MapGrid.Instance != null ? MapGrid.Instance.GetCell(groundPos) : null;
+                    string landmark = Landmarks.DescribeNearest(groundPos, withDistance: false);
+
+                    string report;
+                    if (cell != null && landmark != null)
+                    {
+                        report = Loc.Get("parachute_over_landmark", rounded, cell, landmark);
+                    }
+                    else if (cell != null)
+                    {
+                        report = Loc.Get("parachute_over_cell", rounded, cell);
+                    }
+                    else
+                    {
+                        report = $"{rounded} meters";
+                    }
+
+                    ScreenReaderManager.Speak(report);
                 }
             }
 
@@ -244,7 +270,8 @@ namespace AccessibilityMod
             bool appearing = zoneMgr.safeZoneAppearsMsg.alpha > 0.5f;
             if (appearing && !_zoneAppearing)
             {
-                ScreenReaderManager.Speak("Safe zone appearing soon");
+                if (!Plugin.IsGameplayWarmingUp)
+                    ScreenReaderManager.Speak("Safe zone appearing soon");
             }
             _zoneAppearing = appearing;
 
@@ -252,7 +279,8 @@ namespace AccessibilityMod
             bool shrinkIn = zoneMgr.safeZoneShrinkInMsg.alpha > 0.5f;
             if (shrinkIn && !_zoneShrinkIn)
             {
-                ScreenReaderManager.Speak("Zone shrinking soon. Get to the safe zone");
+                if (!Plugin.IsGameplayWarmingUp)
+                    ScreenReaderManager.Speak("Zone shrinking soon. Get to the safe zone");
             }
             _zoneShrinkIn = shrinkIn;
 
@@ -260,7 +288,8 @@ namespace AccessibilityMod
             bool shrinking = zoneMgr.IsShrinking();
             if (shrinking && !_zoneShrinking)
             {
-                ScreenReaderManager.Speak("Zone shrinking now!");
+                if (!Plugin.IsGameplayWarmingUp)
+                    ScreenReaderManager.Speak("Zone shrinking now!");
             }
             _zoneShrinking = shrinking;
 
@@ -608,6 +637,44 @@ namespace AccessibilityMod
             {
                 return null;
             }
+        }
+
+        private static Vector3 GetGroundPosition(Vector3 position)
+        {
+            int terrainLayer = LayerMask.NameToLayer("Terrain");
+            int envLayer = LayerMask.NameToLayer("Environment");
+            int defaultLayer = LayerMask.NameToLayer("Default");
+
+            int mask = 0;
+            if (terrainLayer != -1) mask |= (1 << terrainLayer);
+            if (envLayer != -1) mask |= (1 << envLayer);
+            if (defaultLayer != -1) mask |= (1 << defaultLayer);
+
+            if (mask == 0) mask = ~0; // Fallback to all layers if names are missing
+
+            if (Physics.Raycast(position, Vector3.down, out RaycastHit hit, 2000f, mask, QueryTriggerInteraction.Ignore))
+            {
+                return hit.point;
+            }
+            return new Vector3(position.x, 0f, position.z);
+        }
+
+        private void MonitorSpectate()
+        {
+            var spectated = CharacterMultiplayer.GetSpectatingPlayer();
+            if (spectated == _lastSpectatedPlayer) return;
+
+            if (_lastSpectatedPlayer != null && _lastSpectatedPlayer.IsDead())
+            {
+                ScreenReaderManager.Speak(Loc.Get("spectating_died", _lastSpectatedPlayer.Nickname));
+            }
+
+            if (spectated != null)
+            {
+                ScreenReaderManager.Speak(Loc.Get("spectating_start", spectated.Nickname));
+            }
+
+            _lastSpectatedPlayer = spectated;
         }
     }
 }

@@ -29,6 +29,19 @@ namespace AccessibilityMod
         private float _announcedNextRadius;
         private bool _nextCircleAnnounced;
 
+        private int _lastAnnouncedShrinkInSeconds = -1;
+        private int _lastAnnouncedShrinkingSeconds = -1;
+        private bool _wasShrinking;
+
+        private static readonly System.Reflection.FieldInfo _appearsInTimer =
+            typeof(DamageZoneManager).GetField("appearsInTimer", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+
+        private static readonly System.Reflection.FieldInfo _shrinkInTimer =
+            typeof(DamageZoneManager).GetField("shrinkInTimer", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+
+        private static readonly System.Reflection.FieldInfo _shrinkingTimer =
+            typeof(DamageZoneManager).GetField("shrinkingTimer", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+
         public void Tick()
         {
             var player = CharacterMultiplayer.GetMainPlayer();
@@ -41,6 +54,9 @@ namespace AccessibilityMod
                     _outsideTimer = 0f;
                     _onDemandCooldownTimer = 0f;
                     _nextCircleAnnounced = false;
+                    _lastAnnouncedShrinkInSeconds = -1;
+                    _lastAnnouncedShrinkingSeconds = -1;
+                    _wasShrinking = false;
                 }
                 return;
             }
@@ -77,6 +93,10 @@ namespace AccessibilityMod
             }
 
             string report = DescribeZone(player, capsule);
+            string timerReport = GetTimerReport(zoneMgr);
+            if (timerReport != null)
+                report += ". " + timerReport;
+
             string next = DescribeNextCircle(player, zoneMgr, capsule);
             if (next != null)
                 report += ". " + next;
@@ -92,7 +112,11 @@ namespace AccessibilityMod
             var capsule = GetActiveCapsule(zoneMgr);
             if (capsule == null) return;
 
-            CheckNextCircle(player, zoneMgr, capsule);
+            if (!Plugin.IsGameplayWarmingUp)
+            {
+                CheckNextCircle(player, zoneMgr, capsule);
+                CheckTimerMilestones(zoneMgr);
+            }
 
             bool inside = IsInside(player, capsule);
 
@@ -283,6 +307,106 @@ namespace AccessibilityMod
             if (angle >= -112.5f && angle < -67.5f) return "left";
             if (angle >= -157.5f && angle < -112.5f) return "behind left";
             return "behind";
+        }
+
+        private void CheckTimerMilestones(DamageZoneManager zoneMgr)
+        {
+            try
+            {
+                bool isShrinking = zoneMgr.IsShrinking();
+
+                // 1. Announce start/stop of shrinking
+                if (isShrinking && !_wasShrinking)
+                {
+                    float duration = zoneMgr.shrinkingDuration;
+                    ScreenReaderManager.Speak(Loc.Get("zone_shrinking_remaining", Mathf.CeilToInt(duration)), false);
+                }
+                _wasShrinking = isShrinking;
+
+                // 2. Announce shrinkInTimer milestones (before shrinking starts)
+                if (!isShrinking)
+                {
+                    float shrinkIn = (float)_shrinkInTimer.GetValue(zoneMgr);
+                    int currentSec = Mathf.CeilToInt(shrinkIn);
+                    if (shrinkIn > 0f)
+                    {
+                        if (currentSec != _lastAnnouncedShrinkInSeconds)
+                        {
+                            if (currentSec == 60 || currentSec == 30 || currentSec == 10 || currentSec == 5)
+                            {
+                                _lastAnnouncedShrinkInSeconds = currentSec;
+                                ScreenReaderManager.Speak(Loc.Get("zone_shrinks_in", currentSec), false);
+                            }
+                        }
+                    }
+                    else
+                    {
+                        _lastAnnouncedShrinkInSeconds = -1;
+                    }
+                    _lastAnnouncedShrinkingSeconds = -1;
+                }
+                else
+                {
+                    // 3. Announce shrinkingTimer milestones (during shrinking)
+                    float shrinking = (float)_shrinkingTimer.GetValue(zoneMgr);
+                    int currentSec = Mathf.CeilToInt(shrinking);
+                    if (shrinking > 0f)
+                    {
+                        if (currentSec != _lastAnnouncedShrinkingSeconds)
+                        {
+                            if (currentSec == 60 || currentSec == 30 || currentSec == 10 || currentSec == 5)
+                            {
+                                _lastAnnouncedShrinkingSeconds = currentSec;
+                                ScreenReaderManager.Speak(Loc.Get("zone_shrinking_remaining", currentSec), false);
+                            }
+                        }
+                    }
+                    else
+                    {
+                        _lastAnnouncedShrinkingSeconds = -1;
+                    }
+                    _lastAnnouncedShrinkInSeconds = -1;
+                }
+            }
+            catch (System.Exception ex)
+            {
+                Plugin.Logger.LogError($"Error in CheckTimerMilestones: {ex}");
+            }
+        }
+
+        private static string GetTimerReport(DamageZoneManager zoneMgr)
+        {
+            if (zoneMgr == null) return null;
+
+            try
+            {
+                float appearsIn = (float)_appearsInTimer.GetValue(zoneMgr);
+                float shrinkIn = (float)_shrinkInTimer.GetValue(zoneMgr);
+                float shrinking = (float)_shrinkingTimer.GetValue(zoneMgr);
+
+                if (appearsIn > 0f)
+                {
+                    return Loc.Get("zone_appears_in", Mathf.CeilToInt(appearsIn));
+                }
+                if (shrinkIn > 0f)
+                {
+                    return Loc.Get("zone_shrinks_in", Mathf.CeilToInt(shrinkIn));
+                }
+                if (zoneMgr.IsShrinking())
+                {
+                    if (shrinking > 0f)
+                    {
+                        return Loc.Get("zone_shrinking_remaining", Mathf.CeilToInt(shrinking));
+                    }
+                    return Loc.Get("zone_shrinking_remaining", "unknown");
+                }
+            }
+            catch (System.Exception ex)
+            {
+                Plugin.Logger.LogError($"Error reading zone timers: {ex}");
+            }
+
+            return null;
         }
     }
 }
