@@ -18,7 +18,7 @@ namespace AccessibilityMod
     /// chose and can be told about rather than a key they have to find under pressure.
     ///
     /// Left Control cannot both fire and heal in the same frame - AccessibleInputController
-    /// stands down whenever this slot is drawn.
+    /// stands down for as long as this slot claims the key (see ClaimsFireKey).
     /// </summary>
     public class HealSlot
     {
@@ -28,10 +28,30 @@ namespace AccessibilityMod
         /// </summary>
         public static bool IsArmed { get; private set; }
 
+        /// <summary>
+        /// True while a Left Control press has been spent on a heal.
+        ///
+        /// IsArmed alone is not enough to stand the gun down, because drinking the
+        /// last heal puts the weapon back in the same frame the key went down - and
+        /// this Tick runs before the input controller's, so it would find the slot
+        /// already empty, the key freshly pressed, and fire. That is the shot that
+        /// went off "sometimes" while healing: always on the last one, or on a press
+        /// that found the bag empty. The claim therefore outlives the disarm and is
+        /// only given up when the key itself comes up, so neither the press nor its
+        /// release can reach the trigger.
+        /// </summary>
+        public static bool ClaimsFireKey => IsArmed || _fireKeyConsumed;
+        private static bool _fireKeyConsumed;
+
         private bool _wasHealing;
 
         public void Tick()
         {
+            // Letting go of the key ends the claim. This runs before the input
+            // controller, so the release frame reaches it with the claim already
+            // dropped - which is only ever a release, never a shot.
+            if (!Input.GetKey(KeyCode.LeftControl)) _fireKeyConsumed = false;
+
             var player = CharacterMultiplayer.GetMainPlayer();
             if (player == null || player.IsDead())
             {
@@ -69,7 +89,11 @@ namespace AccessibilityMod
             }
 
             if (IsArmed && Input.GetKeyDown(KeyCode.LeftControl))
+            {
+                // Claimed before Use runs, because Use is what may disarm.
+                _fireKeyConsumed = true;
                 Use(player);
+            }
         }
 
         private void Toggle(CharacterMultiplayer player)

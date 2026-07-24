@@ -101,9 +101,11 @@ namespace AccessibilityMod
         private void HandleFire(Character character)
         {
             // Left Control means "use what I am holding", and with heals drawn that
-            // is not the gun. Releasing here as well keeps a shot from being left
-            // held down if the slot was drawn mid-burst.
-            if (HealSlot.IsArmed)
+            // is not the gun. The claim rather than IsArmed, because the press that
+            // drinks the last heal also puts the weapon back - and the slot is empty
+            // by the time this runs in that same frame. Releasing here as well keeps
+            // a shot from being left held down if the slot was drawn mid-burst.
+            if (HealSlot.ClaimsFireKey)
             {
                 if (_wasFiring)
                 {
