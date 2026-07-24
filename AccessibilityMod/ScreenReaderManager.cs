@@ -33,20 +33,29 @@ namespace AccessibilityMod
                 if (Directory.Exists(libPath))
                 {
                     // Set DLL search path so Tolk's own dependencies resolve
-                    SetDllDirectory(libPath);
+                    if (!SetDllDirectory(libPath))
+                        logger.LogWarning($"SetDllDirectory failed, Win32 error: {Marshal.GetLastWin32Error()}");
 
-                    // Preload the native DLLs so Mono can find them
-                    string tolkPath = Path.Combine(libPath, "Tolk.dll");
-                    logger.LogInfo($"Loading native Tolk from: {tolkPath}");
-                    IntPtr handle = LoadLibrary(tolkPath);
-                    if (handle == IntPtr.Zero)
+                    // Tolk looks up its driver clients by bare name at Tolk_Load
+                    // time, and SetDllDirectory alone is not enough to find them:
+                    // it is process-global, anything else in the process can clobber
+                    // it, and it is ignored outright once some module has called
+                    // SetDefaultDllDirectories. When the lookup fails the driver just
+                    // reports itself inactive, so NVDA silently drops out of detection
+                    // and Tolk falls through to SAPI.
+                    //
+                    // Preloading each client by full path fixes that: the module is
+                    // then already in the process, and Tolk's bare-name LoadLibrary
+                    // matches it on base name and only bumps the refcount.
+                    // Dependencies first, Tolk.dll last.
+                    foreach (string dep in new[] { "nvdaControllerClient64.dll", "SAAPI64.dll", "Tolk.dll" })
                     {
-                        int err = Marshal.GetLastWin32Error();
-                        logger.LogError($"LoadLibrary failed for Tolk.dll, Win32 error: {err}");
-                    }
-                    else
-                    {
-                        logger.LogInfo("Native Tolk.dll loaded successfully.");
+                        string depPath = Path.Combine(libPath, dep);
+                        logger.LogInfo($"Loading native library: {depPath}");
+                        if (LoadLibrary(depPath) == IntPtr.Zero)
+                            logger.LogError($"LoadLibrary failed for {dep}, Win32 error: {Marshal.GetLastWin32Error()}");
+                        else
+                            logger.LogInfo($"{dep} loaded successfully.");
                     }
                 }
                 else
@@ -60,7 +69,14 @@ namespace AccessibilityMod
                 string sr = DavyKager.Tolk.DetectScreenReader();
                 if (sr != null)
                 {
-                    logger.LogInfo($"Screen reader detected: {sr}");
+                    // SAPI is only ever the last resort. Landing on it while a real
+                    // screen reader is running means that reader's client library
+                    // did not load - say so rather than reporting plain success.
+                    if (sr == "SAPI")
+                        logger.LogWarning("Using SAPI (Windows built-in speech). No screen reader was detected; "
+                            + "if NVDA is running, check the LoadLibrary lines above for a failure.");
+                    else
+                        logger.LogInfo($"Screen reader detected: {sr}");
                     _available = true;
                 }
                 else
