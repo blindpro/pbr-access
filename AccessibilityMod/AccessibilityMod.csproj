@@ -8,6 +8,11 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
+  <PropertyGroup>
+    <ManagedDir Condition="Exists('$(GameDir)\PolygonBitBattleRoyale.app\Contents\Resources\Data\Managed')">$(GameDir)\PolygonBitBattleRoyale.app\Contents\Resources\Data\Managed</ManagedDir>
+    <ManagedDir Condition="'$(ManagedDir)' == ''">$(GameDir)\PolygonBitBattleRoyale_Data\Managed</ManagedDir>
+  </PropertyGroup>
+
   <ItemGroup>
     <PackageReference Include="BepInEx.Analyzers" Version="1.*" PrivateAssets="all" />
     <PackageReference Include="BepInEx.Core" Version="5.*" />
@@ -16,35 +21,35 @@
 
   <ItemGroup>
     <Reference Include="Assembly-CSharp">
-      <HintPath>$(GameDir)\PolygonBitBattleRoyale_Data\Managed\Assembly-CSharp.dll</HintPath>
+      <HintPath>$(ManagedDir)\Assembly-CSharp.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="Unity.TextMeshPro">
-      <HintPath>$(GameDir)\PolygonBitBattleRoyale_Data\Managed\Unity.TextMeshPro.dll</HintPath>
+      <HintPath>$(ManagedDir)\Unity.TextMeshPro.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="Unity.InputSystem">
-      <HintPath>$(GameDir)\PolygonBitBattleRoyale_Data\Managed\Unity.InputSystem.dll</HintPath>
+      <HintPath>$(ManagedDir)\Unity.InputSystem.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="PhotonUnityNetworking">
-      <HintPath>$(GameDir)\PolygonBitBattleRoyale_Data\Managed\PhotonUnityNetworking.dll</HintPath>
+      <HintPath>$(ManagedDir)\PhotonUnityNetworking.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="PhotonRealtime">
-      <HintPath>$(GameDir)\PolygonBitBattleRoyale_Data\Managed\PhotonRealtime.dll</HintPath>
+      <HintPath>$(ManagedDir)\PhotonRealtime.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="UnityEngine.UI">
-      <HintPath>$(GameDir)\PolygonBitBattleRoyale_Data\Managed\UnityEngine.UI.dll</HintPath>
+      <HintPath>$(ManagedDir)\UnityEngine.UI.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="UnityEngine.UIModule">
-      <HintPath>$(GameDir)\PolygonBitBattleRoyale_Data\Managed\UnityEngine.UIModule.dll</HintPath>
+      <HintPath>$(ManagedDir)\UnityEngine.UIModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="UnityEngine.IMGUIModule">
-      <HintPath>$(GameDir)\PolygonBitBattleRoyale_Data\Managed\UnityEngine.IMGUIModule.dll</HintPath>
+      <HintPath>$(ManagedDir)\UnityEngine.IMGUIModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
   </ItemGroup>
