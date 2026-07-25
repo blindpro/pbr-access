@@ -5,33 +5,42 @@ A screen reader mod for Polygon Bit Battle Royale. It speaks the menus, your
 health and ammo, the loot on the ground, the safe zone, and where you are on
 the map, so the game can be played without sight.
 
-Works with NVDA, JAWS, System Access and SAPI (Windows built-in speech).
+Works with NVDA, JAWS, System Access and SAPI on Windows, and VoiceOver on macOS.
 
 
 INSTALLING
 ----------
 
 1. Find your game folder. In Steam: right click Polygon Bit Battle Royale,
-   choose Manage, then Browse local files. The folder is the one that has
-   PolygonBitBattleRoyale.exe in it.
+   choose Manage, then Browse local files.
+   - On Windows: The folder contains PolygonBitBattleRoyale.exe.
+   - On macOS: The folder contains PolygonBitBattleRoyale.app.
 
-2. Copy everything inside this folder - winhttp.dll, doorstop_config.ini and
-   the BepInEx folder - into that game folder.
+2. Copy everything inside this folder into that game folder:
+   - Windows: winhttp.dll, doorstop files, and the BepInEx folder.
+   - macOS: libdoorstop.dylib, run_bepinex.sh, and the BepInEx folder.
 
-   If Windows asks whether to merge or replace folders, say yes to merging.
+   If your operating system asks whether to merge or replace folders, say yes to merging.
 
-3. Start the game normally from Steam. The first launch takes a few seconds
-   longer than usual while the mod loader sets itself up. You should hear the
-   menu being read out.
+3. Launch the game:
+   - Windows: start the game normally from Steam.
+   - macOS: open a terminal in the game folder and run ./run_bepinex.sh
+     (do NOT launch from Steam directly — BepInEx needs the shell script).
 
-Have your screen reader running before you start the game.
+   The first launch takes a few seconds longer than usual while the mod loader
+   sets itself up. You should hear the menu being read out.
+
+Have your screen reader (NVDA/JAWS/SAPI on Windows, or VoiceOver on macOS) running before you start the game.
 
 
 UNINSTALLING
 ------------
 
-Delete winhttp.dll, doorstop_config.ini and the BepInEx folder from the game
-folder. The game goes back to normal.
+Delete the mod files from the game folder:
+- Windows: winhttp.dll, doorstop files, and the BepInEx folder.
+- macOS: libdoorstop.dylib, run_bepinex.sh, and the BepInEx folder.
+
+The game goes back to normal.
 
 
 KEYS
@@ -65,9 +74,12 @@ IF IT DOES NOT TALK
 -------------------
 
 - Make sure your screen reader was already running before the game started.
-- Check that winhttp.dll sits next to PolygonBitBattleRoyale.exe, not inside a
-  sub-folder. This is the most common mistake.
-- Look in BepInEx\LogOutput.log inside the game folder. If the mod loaded it
+- On Windows, check that winhttp.dll sits next to PolygonBitBattleRoyale.exe, not inside a
+  sub-folder.
+- On macOS, check that libdoorstop.dylib, run_bepinex.sh, and the BepInEx folder all sit
+  inside the game directory next to PolygonBitBattleRoyale.app. Make sure run_bepinex.sh
+  is executable (chmod +x run_bepinex.sh) and that you run it from the game folder.
+- Look in BepInEx/LogOutput.log inside the game folder. If the mod loaded it
   will say "Accessibility Mod v... loaded!" near the top. That file is worth
   sending along if you report a problem.
 
@@ -75,5 +87,6 @@ IF IT DOES NOT TALK
 CREDITS
 -------
 
-Screen reader support uses Tolk by Davy Kager.
+Screen reader support uses Tolk by Davy Kager (Windows) and native VoiceOver integration (macOS).
 Mod loading uses BepInEx (https://github.com/BepInEx/BepInEx), LGPL-2.1.
+

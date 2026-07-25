@@ -10,6 +10,7 @@ namespace AccessibilityMod
     {
         private static bool _initialized;
         private static bool _available;
+        private static bool _isMac;
 
         public static bool IsAvailable => _available;
 
@@ -17,6 +18,34 @@ namespace AccessibilityMod
         {
             if (_initialized) return;
             _initialized = true;
+
+            _isMac = Application.platform == RuntimePlatform.OSXPlayer ||
+                     Application.platform == RuntimePlatform.OSXEditor ||
+                     System.IO.Path.DirectorySeparatorChar == '/';
+
+            if (_isMac)
+            {
+                logger.LogInfo("Initializing VoiceOver screen reader backend for macOS...");
+                try
+                {
+                    if (VoiceOverOutput.IsRunning())
+                    {
+                        logger.LogInfo("VoiceOver detected and running on macOS.");
+                    }
+                    else
+                    {
+                        logger.LogWarning("VoiceOver is not currently running on macOS. Output will still be attempted.");
+                    }
+                    _available = true;
+                    logger.LogInfo("macOS VoiceOver backend initialized successfully.");
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError($"Failed to initialize macOS VoiceOver: {ex}");
+                    _available = false;
+                }
+                return;
+            }
 
             try
             {
@@ -102,7 +131,14 @@ namespace AccessibilityMod
             if (!_available || string.IsNullOrEmpty(text)) return;
             try
             {
-                DavyKager.Tolk.Output(text, interrupt);
+                if (_isMac)
+                {
+                    VoiceOverOutput.Speak(text, interrupt);
+                }
+                else
+                {
+                    DavyKager.Tolk.Output(text, interrupt);
+                }
             }
             catch (Exception)
             {
@@ -115,7 +151,14 @@ namespace AccessibilityMod
             if (!_available) return;
             try
             {
-                DavyKager.Tolk.Silence();
+                if (_isMac)
+                {
+                    VoiceOverOutput.Stop();
+                }
+                else
+                {
+                    DavyKager.Tolk.Silence();
+                }
             }
             catch (Exception) { }
         }
@@ -125,7 +168,14 @@ namespace AccessibilityMod
             if (!_initialized) return;
             try
             {
-                DavyKager.Tolk.Unload();
+                if (_isMac)
+                {
+                    VoiceOverOutput.Shutdown();
+                }
+                else
+                {
+                    DavyKager.Tolk.Unload();
+                }
             }
             catch (Exception) { }
             _initialized = false;
